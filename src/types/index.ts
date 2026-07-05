@@ -1,6 +1,14 @@
 export type TranscriptTurn = { role: "caller" | "agent"; text: string; timestamp: string };
-export type Call = { id: string; call_sid: string; niche: string; direction: string; from_number: string; to_number: string; status: string; captured_fields: Record<string,string>; transcript: TranscriptTurn[]; summary: string; next_action: string; started_at: string; ended_at: string | null; duration_seconds: number };
+export type BusinessProfile = Record<string, string | string[] | Record<string, unknown> | unknown[] | null | undefined>;
+export type Call = { id: string; workspace_id?: string; call_sid: string; niche: string; direction: string; from_number: string; to_number: string; status: string; captured_fields: Record<string,string>; transcript: TranscriptTurn[]; summary: string; next_action: string; started_at: string; ended_at: string | null; duration_seconds: number };
 export type Lead = { id: string; name: string; phone: string; status: string; score: number; last_interaction: string; tags: string[]; assigned_agent: string; notes: string; call_count: number; captured_fields: Record<string,string> };
 export type Agent = { id: string; name: string; niche: string; health: string; prompt_version: string; model: string; voice: string; success_rate: number; average_duration: number; call_count: number };
 export type Dashboard = { total_calls: number; active_calls: number; calls_today: number; calls_this_month: number; conversion_rate: number; average_duration: number; calls: Call[] };
 export type ApiResponse<T> = { data: T };
+export type AuthUser = { id: string; workspace_id: string; email: string; full_name: string; business_name: string; business_phone: string; business_website: string; business_details: string; business_profile?: BusinessProfile; default_niche: string };
+export type AuthSession = { token: string; user: AuthUser };
+export type SignupRequest = { email: string; password: string; full_name: string; business_name: string; business_phone: string; business_website: string; business_details: string; default_niche: string };
+export type SigninRequest = { email: string; password: string };
+export type WorkspaceUpdateRequest = Partial<Pick<AuthUser, "full_name" | "business_name" | "business_phone" | "business_website" | "business_details" | "default_niche">>;
+export type OutboundCallRequest = { to_number: string; niche: string; business_name?: string; business_details?: string; campaign_goal?: string };
+export type OutboundCallResponse = { call_sid: string; niche: string };

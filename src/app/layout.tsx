@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { AppShell } from "@/components/app-shell";
 import { Providers } from "@/components/providers";
 
 const geistSans = localFont({
@@ -30,7 +29,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers><AppShell>{children}</AppShell></Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

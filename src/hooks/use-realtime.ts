@@ -1,4 +1,5 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-export function useRealtime() { const client=useQueryClient(); useEffect(()=>{ const url=process.env.NEXT_PUBLIC_WS_URL; if(!url) return; let socket:WebSocket|undefined; try { socket=new WebSocket(url); socket.onmessage=()=>client.invalidateQueries(); } catch {} return()=>socket?.close(); },[client]); }
+import { useAuthStore } from "@/stores/auth-store";
+export function useRealtime() { const client=useQueryClient(); const token=useAuthStore((state)=>state.token); useEffect(()=>{ const url=process.env.NEXT_PUBLIC_WS_URL; if(!url||!token) return; let socket:WebSocket|undefined; try { const nextUrl=new URL(url); nextUrl.searchParams.set("token",token); socket=new WebSocket(nextUrl.toString()); socket.onmessage=()=>client.invalidateQueries(); } catch {} return()=>socket?.close(); },[client,token]); }
