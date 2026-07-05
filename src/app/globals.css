@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --background:#08090d; --foreground:#f4f4f5; color-scheme:dark; }
+* { border-color:rgba(255,255,255,.07); }
+html { background:var(--background); }
+body { color:var(--foreground); background:var(--background); font-family:var(--font-geist-sans),sans-serif; }
+::selection { background:rgba(139,92,246,.35); }
+::-webkit-scrollbar { width:8px;height:8px; }
+::-webkit-scrollbar-thumb { background:#272932;border-radius:99px; }
+input,button,select { font:inherit; }
+@layer utilities { .text-balance{text-wrap:balance}.tabular{font-variant-numeric:tabular-nums}.grid-fade{background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:32px 32px} }

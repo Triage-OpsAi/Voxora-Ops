@@ -1,0 +1,3 @@
+"use client";
+import { AlertTriangle } from "lucide-react";import { Card } from "@/components/ui/card";
+export default function ErrorPage({reset}:{error:Error&{digest?:string};reset:()=>void}){return <Card className="grid min-h-80 place-items-center p-8 text-center"><div><AlertTriangle className="mx-auto text-amber-300"/><h2 className="mt-4 font-medium">This view could not be loaded</h2><p className="mt-2 text-sm text-zinc-500">Check the backend connection and try again.</p><button onClick={reset} className="mt-5 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-black">Try again</button></div></Card>}
