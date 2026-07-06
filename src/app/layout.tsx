@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import "@xyflow/react/dist/style.css";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 

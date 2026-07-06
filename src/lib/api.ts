@@ -1,4 +1,4 @@
-import type { Agent, ApiResponse, AuthSession, Call, Dashboard, Lead, OutboundCallRequest, OutboundCallResponse, SigninRequest, SignupRequest, WorkspaceUpdateRequest } from "@/types";
+import type { Agent, ApiResponse, AuthSession, Call, Dashboard, Lead, OutboundCallRequest, OutboundCallResponse, SigninRequest, SignupRequest, WorkflowDraft, WorkflowRun, WorkspaceUpdateRequest } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 if (!API_URL) throw new Error("NEXT_PUBLIC_API_URL is not configured");
@@ -49,6 +49,16 @@ async function patchRaw<TResponse, TBody>(path: string, body: TBody, token = sto
   return await response.json() as TResponse;
 }
 
+async function putRaw<TResponse, TBody>(path: string, body: TBody, token = storedToken()): Promise<TResponse> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return await response.json() as TResponse;
+}
+
 async function getRaw<TResponse>(path: string, token?: string): Promise<TResponse> {
   const response = await fetch(`${BASE_URL}${path}`, {
     cache: "no-store",
@@ -82,4 +92,12 @@ export const api = {
   publicAgents: () => request<Agent[]>("/api/agents", null),
   agent: (id: string) => request<Agent>(`/api/agents/${id}`),
   startOutboundCall: (payload: OutboundCallRequest) => postRaw<OutboundCallResponse, OutboundCallRequest>("/calls/outbound", payload, storedToken()),
+  workflows: () => request<WorkflowDraft[]>("/api/workflows"),
+  workflow: (id: string) => request<WorkflowDraft>(`/api/workflows/${id}`),
+  createWorkflow: (payload: WorkflowDraft) => postRaw<ApiResponse<WorkflowDraft>, WorkflowDraft>("/api/workflows", payload).then((response) => response.data),
+  saveWorkflow: (payload: WorkflowDraft) => putRaw<ApiResponse<WorkflowDraft>, WorkflowDraft>(`/api/workflows/${payload.id}`, payload).then((response) => response.data),
+  duplicateWorkflow: (id: string) => postRaw<ApiResponse<WorkflowDraft>, Record<string, never>>(`/api/workflows/${id}/duplicate`, {}).then((response) => response.data),
+  activateWorkflow: (id: string) => postRaw<ApiResponse<WorkflowDraft>, Record<string, never>>(`/api/workflows/${id}/activate`, {}).then((response) => response.data),
+  runWorkflow: (id: string) => postRaw<ApiResponse<WorkflowRun>, Record<string, never>>(`/api/workflows/${id}/run`, {}).then((response) => response.data),
+  workflowRuns: (id: string) => request<WorkflowRun[]>(`/api/workflows/${id}/runs`),
 };
