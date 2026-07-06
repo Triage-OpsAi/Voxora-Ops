@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { COUNTRY_CODE_OPTIONS, DEFAULT_COUNTRY_CODE, countryOptionFor, formatPhoneNumber, normalizePhoneNumber, splitPhoneNumber } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
 import type { AuthUser, WorkflowDraft, WorkflowEdge, WorkflowNode, WorkflowNodeStatus, WorkflowRunLog } from "@/types";
@@ -97,7 +98,6 @@ type NodeDefinition = {
 const WORKFLOW_KEY = "voxora.workflow.canvas.v1";
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 92;
-const INDIAN_PHONE_PATTERN = /^\d{10}$/;
 
 const NODE_DEFINITIONS: Record<BuilderNodeKind, NodeDefinition> = {
   start_trigger: {
@@ -901,7 +901,7 @@ async function runVoiceCalls(workflow: WorkflowDraft, user: AuthUser | null): Pr
   if (!voiceNodes.length) return [];
 
   return Promise.all(voiceNodes.map(async (node) => {
-    const normalizedPhone = normalizeIndianPhone(node.config.phoneNumber || "");
+    const normalizedPhone = normalizeRunnablePhone(node.config.phoneNumber || "");
     if (!normalizedPhone.ok) return workflowLog(node, "error", normalizedPhone.message);
 
     const defaultNiche = user?.default_niche?.trim();
@@ -1004,20 +1004,14 @@ function NodeField({
           {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
       ) : field.kind === "phone" && !isMappingValue(value) ? (
-        <div className="relative" {...dropHandlers}>
-          <span className="pointer-events-none absolute left-0 top-1/2 flex h-8 -translate-y-1/2 items-center border-r border-white/[.08] px-3 text-sm font-medium text-zinc-400">
-            +91
-          </span>
-          <input
-            value={phoneDigitsForInput(value)}
-            onFocus={onFocus}
-            onChange={(event) => onChange(sanitizePhoneDigits(event.target.value))}
-            placeholder={field.placeholder}
-            className={cn(className, "h-10 pl-14")}
-            inputMode="numeric"
-            autoComplete="tel"
-          />
-        </div>
+        <PhoneInputField
+          value={value}
+          placeholder={field.placeholder}
+          className={className}
+          onFocus={onFocus}
+          onChange={onChange}
+          dropHandlers={dropHandlers}
+        />
       ) : (
         <input value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder} className={cn(className, "h-10")} {...dropHandlers} />
       )}
@@ -1025,30 +1019,68 @@ function NodeField({
   );
 }
 
+function PhoneInputField({
+  value,
+  placeholder,
+  className,
+  onFocus,
+  onChange,
+  dropHandlers,
+}: {
+  value: string;
+  placeholder?: string;
+  className: string;
+  onFocus: () => void;
+  onChange: (value: string) => void;
+  dropHandlers: {
+    onDragOver: (event: DragEvent<HTMLElement>) => void;
+    onDrop: (event: DragEvent<HTMLElement>) => void;
+  };
+}) {
+  const phone = splitPhoneNumber(value, DEFAULT_COUNTRY_CODE);
+  const countryOption = countryOptionFor(phone.countryCode);
+
+  function updateCountryCode(countryCode: string) {
+    onChange(formatPhoneNumber(countryCode, phone.digits));
+  }
+
+  function updateDigits(nextValue: string) {
+    onChange(formatPhoneNumber(phone.countryCode, nextValue));
+  }
+
+  return (
+    <div className="flex h-10 overflow-hidden rounded-lg border border-white/[.08] bg-black/25 focus-within:border-violet-400/50" {...dropHandlers}>
+      <select
+        value={phone.countryCode}
+        onFocus={onFocus}
+        onChange={(event) => updateCountryCode(event.target.value)}
+        className="h-full border-r border-white/[.08] bg-black/30 px-2 text-xs font-medium text-zinc-300 outline-none"
+        aria-label="Country code"
+      >
+        {COUNTRY_CODE_OPTIONS.map((option) => (
+          <option key={option.code} value={option.code}>{option.label}</option>
+        ))}
+      </select>
+      <input
+        value={phone.digits}
+        onFocus={onFocus}
+        onChange={(event) => updateDigits(event.target.value)}
+        placeholder={countryOption.placeholder || placeholder}
+        className={cn(className, "h-full min-w-0 flex-1 border-0 bg-transparent px-3 focus:border-transparent")}
+        inputMode="numeric"
+        autoComplete="tel"
+      />
+    </div>
+  );
+}
+
 function isMappingValue(value: string) {
   return /\{\{.+\}\}/.test(value.trim());
 }
 
-function sanitizePhoneDigits(value: string) {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length >= 12 && digits.startsWith("91")) return digits.slice(2, 12);
-  return digits.slice(0, 10);
-}
-
-function phoneDigitsForInput(value: string) {
-  return sanitizePhoneDigits(value);
-}
-
-function normalizeIndianPhone(value: string): { ok: true; value: string } | { ok: false; message: string } {
-  if (!value.trim()) return { ok: false, message: "Enter a 10 digit phone number. +91 will be added automatically." };
+function normalizeRunnablePhone(value: string): { ok: true; value: string } | { ok: false; message: string } {
   if (isMappingValue(value)) return { ok: false, message: "Resolve the mapped phone value before running this call node." };
-
-  const digits = sanitizePhoneDigits(value);
-  if (!INDIAN_PHONE_PATTERN.test(digits)) {
-    return { ok: false, message: "Enter a 10 digit phone number. +91 will be added automatically." };
-  }
-
-  return { ok: true, value: `+91${digits}` };
+  return normalizePhoneNumber(value, DEFAULT_COUNTRY_CODE);
 }
 
 function getPreviousNodeGroups(targetNode: BuilderNode, nodes: BuilderNode[], edges: BuilderEdge[]): PreviousNodeGroup[] {

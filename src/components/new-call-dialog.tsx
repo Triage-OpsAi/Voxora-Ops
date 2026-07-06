@@ -5,10 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Check, Loader2, PhoneCall, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { COUNTRY_CODE_OPTIONS, DEFAULT_COUNTRY_CODE, countryOptionFor, formatPhoneNumber, sanitizeNationalPhoneDigits } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
-
-const INDIAN_PHONE_PATTERN = /^\d{10}$/;
 
 function formatNicheLabel(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -18,6 +17,7 @@ export function NewCallDialog() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const [open, setOpen] = useState(false);
+  const [countryCode, setCountryCode] = useState<string>(DEFAULT_COUNTRY_CODE);
   const [phoneDigits, setPhoneDigits] = useState("");
   const [niche, setNiche] = useState("");
   const [campaignGoal, setCampaignGoal] = useState("");
@@ -42,7 +42,8 @@ export function NewCallDialog() {
     },
   });
 
-  const normalizedNumber = useMemo(() => `+91${phoneDigits}`, [phoneDigits]);
+  const countryOption = countryOptionFor(countryCode);
+  const normalizedNumber = useMemo(() => formatPhoneNumber(countryCode, phoneDigits), [countryCode, phoneDigits]);
   const selectedNicheLabel = niche ? formatNicheLabel(niche) : "Select niche";
 
   useEffect(() => {
@@ -52,6 +53,7 @@ export function NewCallDialog() {
   }, [niche, nicheOptions, open, user?.default_niche]);
 
   function resetForm() {
+    setCountryCode(DEFAULT_COUNTRY_CODE);
     setPhoneDigits("");
     setNiche("");
     setCampaignGoal("");
@@ -61,7 +63,12 @@ export function NewCallDialog() {
   }
 
   function handlePhoneChange(value: string) {
-    setPhoneDigits(value.replace(/\D/g, "").slice(0, 10));
+    setPhoneDigits(sanitizeNationalPhoneDigits(value, countryCode));
+  }
+
+  function handleCountryCodeChange(value: string) {
+    setCountryCode(value);
+    setPhoneDigits((current) => sanitizeNationalPhoneDigits(current, value));
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -74,8 +81,8 @@ export function NewCallDialog() {
     mutation.reset();
     setValidationError(null);
 
-    if (!INDIAN_PHONE_PATTERN.test(phoneDigits)) {
-      setValidationError("Enter a 10 digit phone number. +91 will be added automatically.");
+    if (phoneDigits.length !== countryOption.nationalDigits) {
+      setValidationError(`Enter a ${countryOption.nationalDigits} digit ${countryOption.country} phone number.`);
       return;
     }
 
@@ -129,16 +136,23 @@ export function NewCallDialog() {
               <label htmlFor="outbound-to-number" className="text-xs font-medium text-zinc-300">
                 Number
               </label>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-0 top-1/2 flex h-8 -translate-y-1/2 items-center border-r border-white/[.08] px-3 text-sm font-medium text-zinc-400">
-                  +91
-                </span>
+              <div className="flex h-11 overflow-hidden rounded-xl border border-white/[.08] bg-black/20 focus-within:border-violet-500/50">
+                <select
+                  value={countryCode}
+                  onChange={(event) => handleCountryCodeChange(event.target.value)}
+                  className="h-full border-r border-white/[.08] bg-black/20 px-2 text-sm font-medium text-zinc-300 outline-none"
+                  aria-label="Country code"
+                >
+                  {COUNTRY_CODE_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>{option.label}</option>
+                  ))}
+                </select>
                 <input
                   id="outbound-to-number"
                   value={phoneDigits}
                   onChange={(event) => handlePhoneChange(event.target.value)}
-                  className="h-11 w-full rounded-xl border border-white/[.08] bg-black/20 pl-14 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500/50"
-                  placeholder="8055678283"
+                  className="min-w-0 flex-1 bg-transparent px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+                  placeholder={countryOption.placeholder}
                   inputMode="numeric"
                   autoComplete="tel"
                 />
