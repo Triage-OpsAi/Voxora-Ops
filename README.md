@@ -35,6 +35,14 @@ Run the sibling backend from `..\..\voice-agent` on port `8000`. The backend
 owns workspace isolation, business-profile normalization, model routing, and
 call creation. The CRM should not send or trust a frontend workspace id.
 
+## Default marketing agent
+
+The `/agents` route configures the workspace's image-only marketing agent.
+It reads the saved business profile, accepts uploaded image references,
+stores encrypted publisher credentials in the backend, and runs automatically
+at the selected 3, 6, 12, or 24 hour interval. The backend supports LinkedIn,
+Instagram, Facebook, Threads, and an authenticated publisher webhook.
+
 ## Verification
 
 ```bash

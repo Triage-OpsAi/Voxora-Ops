@@ -1,4 +1,4 @@
-import type { Agent, ApiResponse, AuthSession, Call, Dashboard, Lead, OutboundCallRequest, OutboundCallResponse, SigninRequest, SignupRequest, WorkflowDraft, WorkflowRun, WorkspaceUpdateRequest } from "@/types";
+import type { Agent, ApiResponse, AuthSession, Call, Dashboard, Lead, MarketingAgentState, MarketingAgentUpdate, MarketingCredentialInput, MarketingPlatform, OutboundCallRequest, OutboundCallResponse, SigninRequest, SignupRequest, WorkflowDraft, WorkflowRun, WorkspaceUpdateRequest } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 if (!API_URL) throw new Error("NEXT_PUBLIC_API_URL is not configured");
@@ -68,6 +68,25 @@ async function getRaw<TResponse>(path: string, token?: string): Promise<TRespons
   return await response.json() as TResponse;
 }
 
+async function postForm<TResponse>(path: string, body: FormData): Promise<TResponse> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body,
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return await response.json() as TResponse;
+}
+
+async function deleteRaw<TResponse>(path: string): Promise<TResponse> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return await response.json() as TResponse;
+}
+
 async function errorMessage(response: Response) {
   try {
     const payload = await response.json();
@@ -100,4 +119,16 @@ export const api = {
   activateWorkflow: (id: string) => postRaw<ApiResponse<WorkflowDraft>, Record<string, never>>(`/api/workflows/${id}/activate`, {}).then((response) => response.data),
   runWorkflow: (id: string) => postRaw<ApiResponse<WorkflowRun>, Record<string, never>>(`/api/workflows/${id}/run`, {}).then((response) => response.data),
   workflowRuns: (id: string) => request<WorkflowRun[]>(`/api/workflows/${id}/runs`),
+  marketingAgent: () => request<MarketingAgentState>("/api/marketing/agent"),
+  saveMarketingAgent: (payload: MarketingAgentUpdate) => putRaw<ApiResponse<MarketingAgentState>, MarketingAgentUpdate>("/api/marketing/agent", payload).then((response) => response.data),
+  refreshMarketingContext: () => postRaw<ApiResponse<MarketingAgentState>, Record<string, never>>("/api/marketing/agent/context/refresh", {}).then((response) => response.data),
+  runMarketingAgent: () => postRaw<ApiResponse<MarketingAgentState>, Record<string, never>>("/api/marketing/agent/run", {}).then((response) => response.data),
+  uploadMarketingAssets: (files: File[]) => {
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file));
+    return postForm<ApiResponse<MarketingAgentState>>("/api/marketing/assets", body).then((response) => response.data);
+  },
+  deleteMarketingAsset: (assetId: string) => deleteRaw<ApiResponse<MarketingAgentState>>(`/api/marketing/assets/${assetId}`).then((response) => response.data),
+  saveMarketingCredential: (platform: MarketingPlatform, payload: MarketingCredentialInput) => putRaw<ApiResponse<MarketingAgentState>, MarketingCredentialInput>(`/api/marketing/credentials/${platform}`, payload).then((response) => response.data),
+  deleteMarketingCredential: (platform: MarketingPlatform) => deleteRaw<ApiResponse<MarketingAgentState>>(`/api/marketing/credentials/${platform}`).then((response) => response.data),
 };

@@ -18,3 +18,88 @@ export type WorkflowEdge = { id: string; source: string; target: string; output:
 export type WorkflowDraft = { id: string; name: string; active: boolean; updatedAt: string; nodes: WorkflowNode[]; edges: WorkflowEdge[] };
 export type WorkflowRunLog = { id: string; nodeId: string; nodeLabel: string; status: "success" | "error"; message: string; timestamp: string };
 export type WorkflowRun = { id: string; workflowId: string; status: string; startedAt: string; finishedAt: string; logs: WorkflowRunLog[] };
+
+export type MarketingPlatform = "linkedin" | "instagram" | "facebook" | "threads" | "webhook";
+export type MarketingCredentialStatus = {
+  platform: MarketingPlatform;
+  connected: boolean;
+  account_label: string;
+  connected_at: string | null;
+};
+export type MarketingAsset = {
+  id: string;
+  filename: string;
+  content_type: string;
+  origin: "uploaded" | "generated";
+  created_at: string;
+  public_url: string;
+};
+export type MarketingPlatformResult = {
+  platform: MarketingPlatform;
+  status: "published" | "failed" | "skipped";
+  post_id?: string;
+  message?: string;
+};
+export type MarketingRun = {
+  id: string;
+  status: "queued" | "running" | "completed" | "partial" | "failed";
+  trigger: "manual" | "schedule" | "cron";
+  caption: string;
+  headline: string;
+  image_asset_id: string | null;
+  image_url: string | null;
+  model_route: "fast" | "smart";
+  platform_results: MarketingPlatformResult[];
+  error: string;
+  started_at: string;
+  finished_at: string | null;
+};
+export type MarketingBusinessContext = {
+  name: string;
+  website: string;
+  details: string;
+  summary: string;
+  website_summary: string;
+  website_refreshed_at: string | null;
+};
+export type MarketingAgentConfig = {
+  id: string;
+  name: string;
+  active: boolean;
+  goal: string;
+  audience: string;
+  tone: string;
+  call_to_action: string;
+  website_url: string;
+  image_style: string;
+  image_quality: "low" | "medium" | "high";
+  interval_hours: number;
+  timezone: string;
+  platforms: MarketingPlatform[];
+  selected_asset_ids: string[];
+  next_run_at: string | null;
+  last_run_at: string | null;
+  updated_at: string;
+};
+export type MarketingAgentState = {
+  agent: MarketingAgentConfig;
+  business: MarketingBusinessContext;
+  credentials: Record<MarketingPlatform, MarketingCredentialStatus>;
+  assets: MarketingAsset[];
+  runs: MarketingRun[];
+  routing: {
+    copy_model: string;
+    image_model: string;
+    strategy: string;
+  };
+};
+export type MarketingAgentUpdate = Pick<MarketingAgentConfig,
+  "name" | "active" | "goal" | "audience" | "tone" | "call_to_action" | "website_url" |
+  "image_style" | "image_quality" | "interval_hours" | "timezone" | "platforms" | "selected_asset_ids"
+>;
+export type MarketingCredentialInput = {
+  access_token: string;
+  account_id: string;
+  account_label?: string;
+  webhook_url?: string;
+};

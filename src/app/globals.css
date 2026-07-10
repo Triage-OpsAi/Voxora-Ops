@@ -12,6 +12,11 @@ body { color:var(--foreground); background:var(--background); font-family:var(--
 input,button,select { font:inherit; }
 @layer utilities { .text-balance{text-wrap:balance}.tabular{font-variant-numeric:tabular-nums}.grid-fade{background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:32px 32px} }
 
+@layer components {
+  .field-input { @apply h-11 w-full rounded-xl border border-white/[.08] bg-black/20 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:border-violet-400/50 focus:bg-black/30; }
+  .field-textarea { @apply w-full resize-y rounded-xl border border-white/[.08] bg-black/20 px-3 py-2.5 text-sm leading-6 text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:border-violet-400/50 focus:bg-black/30; }
+}
+
 .voxora-flow .react-flow__pane { cursor: grab; }
 .voxora-flow .react-flow__pane:active { cursor: grabbing; }
 .voxora-flow .react-flow__attribution { display:none; }

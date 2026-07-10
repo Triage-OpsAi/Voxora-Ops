@@ -1,1314 +1,586 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
-import { DragEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  addEdge,
-  Background,
-  BackgroundVariant,
-  Controls,
-  Handle,
-  MarkerType,
-  MiniMap,
-  Position,
-  ReactFlow,
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-  useReactFlow,
-  type Connection,
-  type Edge,
-  type Node,
-  type NodeProps,
-  type NodeTypes,
-} from "@xyflow/react";
-import {
+  Activity,
+  AtSign,
   Bot,
   BrainCircuit,
+  BriefcaseBusiness,
   Building2,
-  Copy,
-  Diamond,
-  Flag,
+  Camera,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  Clock3,
+  FileImage,
   Globe2,
-  PhoneCall,
+  ImagePlus,
+  Loader2,
+  LockKeyhole,
   Play,
-  Plus,
-  Power,
+  RefreshCw,
   Save,
+  Send,
+  Sparkles,
   Trash2,
-  UserPlus,
-  X,
+  Upload,
+  UsersRound,
+  Webhook,
+  XCircle,
+  Zap,
 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { COUNTRY_CODE_OPTIONS, DEFAULT_COUNTRY_CODE, countryOptionFor, formatPhoneNumber, normalizePhoneNumber, splitPhoneNumber } from "@/lib/phone";
 import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/stores/auth-store";
-import type { AuthUser, WorkflowDraft, WorkflowEdge, WorkflowNode, WorkflowNodeStatus, WorkflowRunLog } from "@/types";
+import { Card } from "@/components/ui/card";
+import type {
+  MarketingAgentState,
+  MarketingAgentUpdate,
+  MarketingCredentialInput,
+  MarketingPlatform,
+  MarketingRun,
+} from "@/types";
 
-type BuilderNodeKind =
-  | "start_trigger"
-  | "http_api"
-  | "ai_agent"
-  | "business_details"
-  | "call_voice"
-  | "lead_capture"
-  | "condition"
-  | "end";
-
-type BuilderNodeData = {
-  kind: BuilderNodeKind;
+const PLATFORM_META: Record<MarketingPlatform, {
   label: string;
   description: string;
-  config: Record<string, string>;
-  status: WorkflowNodeStatus;
-} & Record<string, unknown>;
-
-type BuilderNode = Node<BuilderNodeData, "workflowNode">;
-type BuilderEdge = Edge<{ output: string }>;
-type PreviousNodeGroup = { node: BuilderNode; fields: OutputField[] };
-
-type NodeConfigField = {
-  key: string;
-  label: string;
-  placeholder?: string;
-  kind?: "text" | "textarea" | "select" | "phone";
-  options?: string[];
-};
-
-type OutputField = {
-  key: string;
-  label: string;
-  type: string;
-  description?: string;
-};
-
-type NodeDefinition = {
-  kind: BuilderNodeKind;
-  label: string;
-  shortLabel: string;
-  description: string;
+  accountLabel: string;
+  accountPlaceholder: string;
   icon: typeof Bot;
-  color: string;
-  minimapColor: string;
-  outputs: string[];
-  outputSchema: OutputField[];
-  fields: NodeConfigField[];
-};
-
-const WORKFLOW_KEY = "voxora.workflow.canvas.v1";
-const NODE_WIDTH = 220;
-const NODE_HEIGHT = 92;
-
-const NODE_DEFINITIONS: Record<BuilderNodeKind, NodeDefinition> = {
-  start_trigger: {
-    kind: "start_trigger",
-    label: "Start",
-    shortLabel: "Start",
-    description: "Optional entry point. A workflow can also begin from any node.",
-    icon: Play,
-    color: "border-emerald-400/35 bg-emerald-400/10 text-emerald-200",
-    minimapColor: "#34d399",
-    outputs: ["start"],
-    outputSchema: [
-      { key: "event", label: "event", type: "string" },
-      { key: "timestamp", label: "timestamp", type: "datetime" },
-      { key: "payload", label: "payload", type: "object" },
-    ],
-    fields: [{ key: "event", label: "Trigger event", placeholder: "New lead created" }],
+  tone: string;
+}> = {
+  linkedin: {
+    label: "LinkedIn Page",
+    description: "Publish image posts as your organization.",
+    accountLabel: "Organization ID or URN",
+    accountPlaceholder: "123456 or urn:li:organization:123456",
+    icon: BriefcaseBusiness,
+    tone: "text-sky-300 bg-sky-400/10 border-sky-400/20",
   },
-  http_api: {
-    kind: "http_api",
-    label: "HTTP / API",
-    shortLabel: "API",
-    description: "Call an API and expose its response fields to connected nodes.",
-    icon: Globe2,
-    color: "border-blue-400/35 bg-blue-400/10 text-blue-200",
-    minimapColor: "#60a5fa",
-    outputs: ["response"],
-    outputSchema: [],
-    fields: [
-      { key: "url", label: "URL", placeholder: "https://api.example.com/leads" },
-      { key: "method", label: "Method", kind: "select", options: ["GET", "POST", "PUT", "PATCH"] },
-      { key: "responseSchema", label: "Response schema", placeholder: '{ "name": "string", "phone": "string", "email": "string" }', kind: "textarea" },
-    ],
+  instagram: {
+    label: "Instagram",
+    description: "Publish to an Instagram professional account.",
+    accountLabel: "Instagram account ID",
+    accountPlaceholder: "17841400000000000",
+    icon: Camera,
+    tone: "text-fuchsia-300 bg-fuchsia-400/10 border-fuchsia-400/20",
   },
-  ai_agent: {
-    kind: "ai_agent",
-    label: "AI Agent",
-    shortLabel: "AI Agent",
-    description: "Reason over context, summarize, classify, or decide the next action.",
-    icon: BrainCircuit,
-    color: "border-fuchsia-400/35 bg-fuchsia-400/10 text-fuchsia-200",
-    minimapColor: "#e879f9",
-    outputs: ["result"],
-    outputSchema: [
-      { key: "response", label: "response", type: "string" },
-      { key: "structuredJson", label: "structuredJson", type: "object" },
-      { key: "confidence", label: "confidence", type: "number" },
-      { key: "nextAction", label: "nextAction", type: "string" },
-    ],
-    fields: [
-      { key: "task", label: "Task", kind: "select", options: ["Summarize", "Classify", "Extract", "Decide"] },
-      { key: "prompt", label: "Prompt", placeholder: "Use the lead and call context to decide the next step.", kind: "textarea" },
-    ],
+  facebook: {
+    label: "Facebook Page",
+    description: "Upload and publish directly to a Page.",
+    accountLabel: "Facebook Page ID",
+    accountPlaceholder: "102030405060",
+    icon: UsersRound,
+    tone: "text-blue-300 bg-blue-400/10 border-blue-400/20",
   },
-  business_details: {
-    kind: "business_details",
-    label: "Business Details",
-    shortLabel: "Business",
-    description: "Inject company context, offer, policies, hours, and tone.",
-    icon: Building2,
-    color: "border-sky-400/35 bg-sky-400/10 text-sky-200",
-    minimapColor: "#38bdf8",
-    outputs: ["context"],
-    outputSchema: [
-      { key: "businessName", label: "businessName", type: "string" },
-      { key: "details", label: "details", type: "string" },
-      { key: "services", label: "services", type: "array" },
-      { key: "hours", label: "hours", type: "string" },
-    ],
-    fields: [
-      { key: "businessName", label: "Business name", placeholder: "Acme Services" },
-      { key: "details", label: "Details", placeholder: "Hours, offers, process, FAQs.", kind: "textarea" },
-    ],
+  threads: {
+    label: "Threads",
+    description: "Publish image-led posts to Threads.",
+    accountLabel: "Threads user ID",
+    accountPlaceholder: "1234567890",
+    icon: AtSign,
+    tone: "text-zinc-200 bg-white/[.06] border-white/[.1]",
   },
-  call_voice: {
-    kind: "call_voice",
-    label: "Call / Voice",
-    shortLabel: "Voice",
-    description: "Use the existing voice agent to place or handle a call.",
-    icon: PhoneCall,
-    color: "border-violet-400/35 bg-violet-400/10 text-violet-200",
-    minimapColor: "#a78bfa",
-    outputs: ["completed", "failed"],
-    outputSchema: [
-      { key: "callStatus", label: "callStatus", type: "string" },
-      { key: "transcript", label: "transcript", type: "string" },
-      { key: "summary", label: "summary", type: "string" },
-      { key: "name", label: "name", type: "string" },
-      { key: "phone", label: "phone", type: "string" },
-      { key: "email", label: "email", type: "string" },
-      { key: "bookingStatus", label: "bookingStatus", type: "string" },
-      { key: "bookingConfirmed", label: "bookingConfirmed", type: "boolean" },
-      { key: "structuredResponse", label: "structuredResponse", type: "object" },
-    ],
-    fields: [
-      { key: "phoneNumber", label: "Phone number", placeholder: "8055678283", kind: "phone" },
-      { key: "goal", label: "Call goal", placeholder: "Qualify the lead and capture appointment intent.", kind: "textarea" },
-    ],
-  },
-  lead_capture: {
-    kind: "lead_capture",
-    label: "Lead Capture",
-    shortLabel: "Lead",
-    description: "Read or write lead fields for the workflow.",
-    icon: UserPlus,
-    color: "border-cyan-400/35 bg-cyan-400/10 text-cyan-200",
-    minimapColor: "#22d3ee",
-    outputs: ["lead"],
-    outputSchema: [
-      { key: "name", label: "name", type: "string" },
-      { key: "phone", label: "phone", type: "string" },
-      { key: "email", label: "email", type: "string" },
-      { key: "status", label: "status", type: "string" },
-      { key: "score", label: "score", type: "number" },
-    ],
-    fields: [
-      { key: "name", label: "Name", placeholder: "{{previousNode.name}}" },
-      { key: "phone", label: "Phone", placeholder: "{{previousNode.phone}}" },
-      { key: "email", label: "Email", placeholder: "{{previousNode.email}}" },
-      { key: "source", label: "Lead source", placeholder: "CRM, form, imported CSV" },
-    ],
-  },
-  condition: {
-    kind: "condition",
-    label: "Condition",
-    shortLabel: "If",
-    description: "Branch the workflow based on structured data.",
-    icon: Diamond,
-    color: "border-amber-400/35 bg-amber-400/10 text-amber-200",
-    minimapColor: "#fbbf24",
-    outputs: ["true", "false"],
-    outputSchema: [
-      { key: "result", label: "result", type: "boolean" },
-      { key: "branch", label: "branch", type: "string" },
-      { key: "matchedValue", label: "matchedValue", type: "string" },
-    ],
-    fields: [
-      { key: "left", label: "Value", placeholder: "{{previousNode.bookingStatus}}" },
-      { key: "operator", label: "Operator", kind: "select", options: ["equals", "contains", "greater than", "less than"] },
-      { key: "right", label: "Compare with", placeholder: "book_confirmed" },
-    ],
-  },
-  end: {
-    kind: "end",
-    label: "End",
-    shortLabel: "End",
-    description: "Complete the workflow.",
-    icon: Flag,
-    color: "border-rose-400/35 bg-rose-400/10 text-rose-200",
-    minimapColor: "#fb7185",
-    outputs: [],
-    outputSchema: [
-      { key: "result", label: "result", type: "string" },
-      { key: "completedAt", label: "completedAt", type: "datetime" },
-    ],
-    fields: [{ key: "result", label: "Result label", placeholder: "Workflow completed" }],
+  webhook: {
+    label: "Other platforms",
+    description: "Send the campaign to your publishing webhook.",
+    accountLabel: "Connection name",
+    accountPlaceholder: "Buffer, Make, Zapier, custom publisher",
+    icon: Webhook,
+    tone: "text-amber-300 bg-amber-400/10 border-amber-400/20",
   },
 };
 
-const TOOLBAR_NODES: BuilderNodeKind[] = [
-  "http_api",
-  "ai_agent",
-  "business_details",
-  "call_voice",
-  "lead_capture",
-  "condition",
-  "end",
-];
-
-const DEFAULT_WORKFLOW: WorkflowDraft = {
-  id: "workflow-default",
-  name: "Call confirmation flow",
-  active: false,
-  updatedAt: "2026-01-01T00:00:00.000Z",
-  nodes: [
-    createWorkflowNode("call_voice", { x: 120, y: 260 }, "voice-default", {
-      phoneNumber: "",
-      goal: "Call the customer and confirm whether the booking is confirmed.",
-    }, "Trigger Call"),
-    createWorkflowNode("condition", { x: 430, y: 260 }, "condition-default", {
-      left: "{{previousNode.bookingStatus}}",
-      operator: "equals",
-      right: "book_confirmed",
-    }, "Booking confirmed?"),
-    createWorkflowNode("lead_capture", { x: 740, y: 130 }, "lead-default", {
-      name: "{{voice-default.name}}",
-      phone: "{{voice-default.phone}}",
-      email: "{{voice-default.email}}",
-      source: "Confirmed booking call",
-    }, "Save Confirmed Booking"),
-    createWorkflowNode("end", { x: 1040, y: 130 }, "confirmed-end-default", {
-      result: "Booking confirmed",
-    }, "Confirmed"),
-    createWorkflowNode("end", { x: 740, y: 390 }, "not-confirmed-end-default", {
-      result: "Booking not confirmed",
-    }, "Not Confirmed"),
-  ],
-  edges: [
-    { id: "edge-voice-condition", source: "voice-default", target: "condition-default", output: "completed" },
-    { id: "edge-condition-lead", source: "condition-default", target: "lead-default", output: "true" },
-    { id: "edge-lead-confirmed", source: "lead-default", target: "confirmed-end-default", output: "lead" },
-    { id: "edge-condition-not-confirmed", source: "condition-default", target: "not-confirmed-end-default", output: "false" },
-  ],
-};
+const PLATFORMS = Object.keys(PLATFORM_META) as MarketingPlatform[];
+const EMPTY_CREDENTIAL: MarketingCredentialInput = { access_token: "", account_id: "", account_label: "", webhook_url: "" };
 
 export function AgentsView() {
-  return (
-    <ReactFlowProvider>
-      <AgentsCanvas />
-    </ReactFlowProvider>
-  );
-}
-
-function AgentsCanvas() {
-  const { screenToFlowPosition, fitView } = useReactFlow();
   const queryClient = useQueryClient();
-  const user = useAuthStore((state) => state.user);
-  const { data: savedWorkflows, isLoading } = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
-  const [workflowId, setWorkflowId] = useState(DEFAULT_WORKFLOW.id);
-  const [workflowName, setWorkflowName] = useState(DEFAULT_WORKFLOW.name);
-  const [activeWorkflow, setActiveWorkflow] = useState(DEFAULT_WORKFLOW.active);
-  const [availableWorkflows, setAvailableWorkflows] = useState<WorkflowDraft[]>([DEFAULT_WORKFLOW]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<BuilderNode>(workflowToFlowNodes(DEFAULT_WORKFLOW));
-  const [edges, setEdges, onEdgesChange] = useEdgesState<BuilderEdge>(workflowToFlowEdges(DEFAULT_WORKFLOW));
-  const [selectedNodeId, setSelectedNodeId] = useState<string>("");
-  const [statusText, setStatusText] = useState("Ready");
-  const [runLogs, setRunLogs] = useState<WorkflowRunLog[]>([]);
-
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
-  const previousNodeGroups = selectedNode ? getPreviousNodeGroups(selectedNode, nodes, edges) : [];
-  const nodeTypes = useMemo<NodeTypes>(() => ({ workflowNode: WorkflowCanvasNode }), []);
-
-  const applyWorkflow = useCallback((workflow: WorkflowDraft) => {
-    const normalized = normalizeWorkflow(workflow);
-    setWorkflowId(normalized.id);
-    setWorkflowName(normalized.name);
-    setActiveWorkflow(normalized.active);
-    setNodes(workflowToFlowNodes(normalized));
-    setEdges(workflowToFlowEdges(normalized));
-    setSelectedNodeId("");
-    setRunLogs([]);
-    window.requestAnimationFrame(() => fitView({ padding: 0.22, duration: 250 }));
-  }, [fitView, setEdges, setNodes]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["marketing-agent"],
+    queryFn: api.marketingAgent,
+    refetchInterval: 15_000,
+  });
+  const [form, setForm] = useState<MarketingAgentUpdate | null>(null);
+  const [credentials, setCredentials] = useState<Record<MarketingPlatform, MarketingCredentialInput>>(() => ({
+    linkedin: { ...EMPTY_CREDENTIAL },
+    instagram: { ...EMPTY_CREDENTIAL },
+    facebook: { ...EMPTY_CREDENTIAL },
+    threads: { ...EMPTY_CREDENTIAL },
+    webhook: { ...EMPTY_CREDENTIAL },
+  }));
+  const [pending, setPending] = useState<string>("");
+  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
-    const saved = savedWorkflows?.map(normalizeWorkflow) || [];
-    const list = [DEFAULT_WORKFLOW, ...saved.filter((workflow) => workflow.id !== DEFAULT_WORKFLOW.id)];
-    setAvailableWorkflows(list);
-    applyWorkflow(DEFAULT_WORKFLOW);
-  }, [applyWorkflow, savedWorkflows]);
+    if (!data || form) return;
+    setForm(configToForm(data));
+  }, [data, form]);
 
-  function currentWorkflow(): WorkflowDraft {
-    return {
-      id: workflowId,
-      name: workflowName.trim() || "Untitled workflow",
-      active: activeWorkflow,
-      updatedAt: new Date().toISOString(),
-      nodes: nodes.map(flowNodeToWorkflowNode),
-      edges: edges.map(flowEdgeToWorkflowEdge),
-    };
+  const connectedCount = useMemo(
+    () => data ? PLATFORMS.filter((platform) => data.credentials[platform]?.connected).length : 0,
+    [data],
+  );
+
+  function update<K extends keyof MarketingAgentUpdate>(key: K, value: MarketingAgentUpdate[K]) {
+    setNotice(null);
+    setForm((current) => current ? { ...current, [key]: value } : current);
   }
 
-  function updateWorkflowList(workflow: WorkflowDraft) {
-    setAvailableWorkflows((current) => {
-      const exists = current.some((item) => item.id === workflow.id);
-      return exists ? current.map((item) => item.id === workflow.id ? workflow : item) : [workflow, ...current];
-    });
+  function acceptState(next: MarketingAgentState, syncForm = false) {
+    queryClient.setQueryData(["marketing-agent"], next);
+    if (syncForm) setForm(configToForm(next));
   }
 
-  async function saveWorkflow() {
-    const draft = currentWorkflow();
-    setStatusText("Saving...");
-    saveLocalWorkflow(draft);
+  async function saveAgent(activate?: boolean) {
+    if (!form) return null;
+    const payload = activate === undefined ? form : { ...form, active: activate };
+    setPending("save");
+    setNotice(null);
     try {
-      const saved = await api.saveWorkflow(draft);
-      const normalized = normalizeWorkflow(saved);
-      updateWorkflowList(normalized);
-      setWorkflowId(normalized.id);
-      setStatusText("Saved");
-    } catch (error) {
-      setStatusText(error instanceof Error ? error.message : "Saved locally");
+      const next = await api.saveMarketingAgent(payload);
+      acceptState(next, true);
+      setNotice({ type: "success", message: payload.active ? "Agent saved and schedule activated." : "Agent configuration saved." });
+      return next;
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, "Could not save the agent.") });
+      return null;
+    } finally {
+      setPending("");
     }
   }
 
-  async function createNewWorkflow() {
-    const draft: WorkflowDraft = {
-      ...DEFAULT_WORKFLOW,
-      id: makeId("workflow"),
-      name: "Untitled workflow",
-      active: false,
-      updatedAt: new Date().toISOString(),
-      nodes: [],
-      edges: [],
-    };
-    applyWorkflow(draft);
-    updateWorkflowList(draft);
-    saveLocalWorkflow(draft);
+  async function runNow() {
+    if (!form) return;
+    setPending("run");
+    setNotice(null);
     try {
-      const saved = await api.createWorkflow(draft);
-      applyWorkflow(saved);
-      updateWorkflowList(saved);
-      setStatusText("Created");
-    } catch {
-      setStatusText("Created locally");
+      const saved = await api.saveMarketingAgent(form);
+      acceptState(saved, true);
+      const next = await api.runMarketingAgent();
+      acceptState(next, true);
+      const latest = next.runs[0];
+      setNotice({
+        type: latest?.status === "failed" ? "error" : "success",
+        message: latest?.status === "failed" ? latest.error || "Campaign run failed." : "Campaign generated and sent to the connected publishers.",
+      });
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, "Could not run the campaign.") });
+    } finally {
+      setPending("");
     }
   }
 
-  async function duplicateWorkflow() {
-    const draft = currentWorkflow();
-    await saveWorkflow();
-    setStatusText("Duplicating...");
+  async function refreshContext() {
+    if (!form) return;
+    setPending("context");
+    setNotice(null);
     try {
-      const duplicated = await api.duplicateWorkflow(draft.id);
-      applyWorkflow(duplicated);
-      updateWorkflowList(duplicated);
-      setStatusText("Duplicated");
-    } catch {
-      const localCopy = {
-        ...draft,
-        id: makeId("workflow"),
-        name: `${draft.name} copy`,
-        active: false,
-        nodes: draft.nodes.map((node, index) => ({ ...node, id: makeId(node.type), x: node.x + 60, y: node.y + 60 + index * 8 })),
-        edges: [],
-      };
-      applyWorkflow(localCopy);
-      updateWorkflowList(localCopy);
-      setStatusText("Duplicated locally");
+      const saved = await api.saveMarketingAgent(form);
+      acceptState(saved, true);
+      const next = await api.refreshMarketingContext();
+      acceptState(next, true);
+      setNotice({ type: "success", message: "Website context refreshed and cached for future campaigns." });
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, "Could not read the website.") });
+    } finally {
+      setPending("");
     }
   }
 
-  async function activateWorkflow() {
-    const draft = currentWorkflow();
-    setStatusText("Activating...");
+  async function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    setPending("upload");
+    setNotice(null);
     try {
-      await api.saveWorkflow(draft);
-      const activated = await api.activateWorkflow(draft.id);
-      setActiveWorkflow(true);
-      updateWorkflowList(activated);
-      setStatusText("Active");
-    } catch (error) {
-      setStatusText(error instanceof Error ? error.message : "Could not activate");
+      const next = await api.uploadMarketingAssets(files);
+      acceptState(next);
+      const newIds = next.assets.filter((asset) => files.some((file) => file.name === asset.filename)).map((asset) => asset.id);
+      setForm((current) => current ? {
+        ...current,
+        selected_asset_ids: Array.from(new Set([...current.selected_asset_ids, ...newIds])),
+      } : current);
+      setNotice({ type: "success", message: `${files.length} image${files.length === 1 ? "" : "s"} added to the campaign library.` });
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, "Could not upload the selected images.") });
+    } finally {
+      setPending("");
     }
   }
 
-  async function runWorkflow() {
-    const draft = currentWorkflow();
-    setStatusText("Running...");
-    setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: "running" } })));
+  async function deleteAsset(assetId: string) {
+    setPending(`asset:${assetId}`);
     try {
-      const saved = await api.saveWorkflow(draft);
-      const voiceLogs = await runVoiceCalls(draft, user);
-      const hasVoiceErrors = voiceLogs.some((log) => log.status === "error");
-      const run = hasVoiceErrors ? null : await api.runWorkflow(saved.id);
-      const logs = [...voiceLogs, ...(run?.logs || [])];
-      const successfulNodes = new Set(logs.filter((log) => log.status === "success").map((log) => log.nodeId));
-      const failedNodes = new Set(logs.filter((log) => log.status === "error").map((log) => log.nodeId));
-      setNodes((current) => current.map((node) => ({
-        ...node,
-        data: { ...node.data, status: failedNodes.has(node.id) ? "error" : successfulNodes.has(node.id) ? "success" : "idle" },
-      })));
-      setRunLogs(logs);
-      queryClient.invalidateQueries();
-      setStatusText(hasVoiceErrors ? "Fix call node" : voiceLogs.length ? "Call queued" : `Run ${run?.status || "complete"}`);
-    } catch (error) {
-      setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: "idle" } })));
-      setStatusText(error instanceof Error ? error.message : "Could not run");
+      const next = await api.deleteMarketingAsset(assetId);
+      acceptState(next);
+      setForm((current) => current ? { ...current, selected_asset_ids: current.selected_asset_ids.filter((id) => id !== assetId) } : current);
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, "Could not delete the image.") });
+    } finally {
+      setPending("");
     }
   }
 
-  const onConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target) return;
-    const output = connection.sourceHandle || "out";
-    const sourceNode = nodes.find((node) => node.id === connection.source);
-    setEdges((current) => addEdge({
-      ...connection,
-      id: makeId("edge"),
-      sourceHandle: output,
-      type: "smoothstep",
-      animated: true,
-      label: edgeOutputLabel(sourceNode?.data.kind, output),
-      labelStyle: { fill: "#d4d4d8", fontSize: 11, fontWeight: 600 },
-      labelBgStyle: { fill: "#10141d", fillOpacity: 0.92 },
-      labelBgPadding: [8, 4],
-      labelBgBorderRadius: 8,
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#8b5cf6" },
-      style: { stroke: "#8b5cf6", strokeWidth: 2 },
-      data: { output },
-    }, current));
-  }, [nodes, setEdges]);
-
-  const onDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const kind = event.dataTransfer.getData("application/voxora-flow-node") as BuilderNodeKind;
-    if (!NODE_DEFINITIONS[kind]) return;
-    const position = findOpenPosition(screenToFlowPosition({ x: event.clientX, y: event.clientY }), nodes);
-    const workflowNode = createWorkflowNode(kind, position);
-    setNodes((current) => [...current, workflowNodeToFlowNode(workflowNode)]);
-    setSelectedNodeId(workflowNode.id);
-  }, [nodes, screenToFlowPosition, setNodes]);
-
-  const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }, []);
-
-  function deleteSelectedNode() {
-    if (!selectedNodeId) return;
-    setNodes((current) => current.filter((node) => node.id !== selectedNodeId));
-    setEdges((current) => current.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId));
-    setSelectedNodeId("");
+  function toggleAsset(assetId: string) {
+    if (!form) return;
+    const selected = form.selected_asset_ids.includes(assetId);
+    update("selected_asset_ids", selected
+      ? form.selected_asset_ids.filter((id) => id !== assetId)
+      : [...form.selected_asset_ids, assetId]);
   }
 
-  function updateSelectedNode(config: Record<string, string>, label: string) {
-    if (!selectedNode) return;
-    setNodes((current) => current.map((node) => node.id === selectedNode.id ? {
-      ...node,
-      data: { ...node.data, label, config },
-    } : node));
+  function togglePlatform(platform: MarketingPlatform) {
+    if (!form) return;
+    const selected = form.platforms.includes(platform);
+    update("platforms", selected ? form.platforms.filter((item) => item !== platform) : [...form.platforms, platform]);
   }
 
-  return (
-    <div className="-m-4 h-[calc(100vh-4rem)] overflow-hidden bg-[#07090d] md:-m-7 lg:-m-8">
-      <div className="relative h-full w-full">
-        <TopToolbar
-          workflows={availableWorkflows}
-          workflowId={workflowId}
-          workflowName={workflowName}
-          active={activeWorkflow}
-          loading={isLoading}
-          statusText={statusText}
-          onWorkflowNameChange={setWorkflowName}
-          onWorkflowChange={(nextId) => {
-            const next = availableWorkflows.find((item) => item.id === nextId);
-            if (next) applyWorkflow(next);
-          }}
-          onNew={createNewWorkflow}
-          onSave={saveWorkflow}
-          onDuplicate={duplicateWorkflow}
-          onRun={runWorkflow}
-          onActivate={activateWorkflow}
-        />
-
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-          onPaneClick={() => setSelectedNodeId("")}
-          fitView
-          fitViewOptions={{ padding: 0.24 }}
-          minZoom={0.35}
-          maxZoom={1.6}
-          panOnScroll
-          selectionOnDrag
-          snapToGrid
-          snapGrid={[16, 16]}
-          defaultEdgeOptions={{
-            type: "smoothstep",
-            animated: true,
-            markerEnd: { type: MarkerType.ArrowClosed, color: "#8b5cf6" },
-            style: { stroke: "#8b5cf6", strokeWidth: 2 },
-          }}
-          className="voxora-flow"
-        >
-          <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="rgba(255,255,255,.18)" />
-          <Controls className="voxora-flow-controls" showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            className="voxora-flow-minimap"
-            nodeColor={(node) => NODE_DEFINITIONS[(node.data as BuilderNodeData).kind]?.minimapColor || "#71717a"}
-          />
-        </ReactFlow>
-
-        {selectedNode && (
-          <NodeSettingsPanel
-            node={selectedNode}
-            previousGroups={previousNodeGroups}
-            onClose={() => setSelectedNodeId("")}
-            onDelete={deleteSelectedNode}
-            onUpdate={updateSelectedNode}
-          />
-        )}
-
-        {runLogs.length > 0 && <RunLogBar logs={runLogs} onClose={() => setRunLogs([])} />}
-      </div>
-    </div>
-  );
-}
-
-function TopToolbar({
-  workflows,
-  workflowId,
-  workflowName,
-  active,
-  loading,
-  statusText,
-  onWorkflowNameChange,
-  onWorkflowChange,
-  onNew,
-  onSave,
-  onDuplicate,
-  onRun,
-  onActivate,
-}: {
-  workflows: WorkflowDraft[];
-  workflowId: string;
-  workflowName: string;
-  active: boolean;
-  loading: boolean;
-  statusText: string;
-  onWorkflowNameChange: (value: string) => void;
-  onWorkflowChange: (value: string) => void;
-  onNew: () => void;
-  onSave: () => void;
-  onDuplicate: () => void;
-  onRun: () => void;
-  onActivate: () => void;
-}) {
-  return (
-    <div className="pointer-events-none absolute left-4 right-4 top-4 z-20 flex flex-wrap items-start justify-between gap-3">
-      <div className="pointer-events-auto rounded-xl border border-white/[.08] bg-[#0c1018]/95 p-2 shadow-2xl shadow-black/30 backdrop-blur-xl">
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={workflowId}
-            onChange={(event) => onWorkflowChange(event.target.value)}
-            className="h-9 max-w-48 rounded-lg border border-white/[.08] bg-black/25 px-2 text-xs text-zinc-200 outline-none"
-          >
-            {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}
-          </select>
-          <input
-            value={workflowName}
-            onChange={(event) => onWorkflowNameChange(event.target.value)}
-            className="h-9 w-52 rounded-lg border border-white/[.08] bg-black/25 px-3 text-sm font-medium text-white outline-none placeholder:text-zinc-600"
-          />
-          <ToolbarButton label="New" icon={<Plus size={14} />} onClick={onNew} />
-          <ToolbarButton label="Save" icon={<Save size={14} />} onClick={onSave} />
-          <ToolbarButton label="Copy" icon={<Copy size={14} />} onClick={onDuplicate} />
-          <ToolbarButton label="Run" icon={<Play size={14} />} onClick={onRun} strong />
-          <ToolbarButton label={active ? "Active" : "Activate"} icon={<Power size={14} />} onClick={onActivate} active={active} />
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {TOOLBAR_NODES.map((kind) => <ToolbarNode key={kind} definition={NODE_DEFINITIONS[kind]} />)}
-        </div>
-      </div>
-
-      <div className="pointer-events-auto rounded-xl border border-white/[.08] bg-[#0c1018]/95 px-3 py-2 text-xs text-zinc-400 shadow-2xl shadow-black/30 backdrop-blur-xl">
-        {loading ? "Loading..." : statusText}
-      </div>
-    </div>
-  );
-}
-
-function ToolbarNode({ definition }: { definition: NodeDefinition }) {
-  const Icon = definition.icon;
-  return (
-    <button
-      draggable
-      onDragStart={(event) => {
-        event.dataTransfer.setData("application/voxora-flow-node", definition.kind);
-        event.dataTransfer.effectAllowed = "move";
-      }}
-      className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/[.08] bg-white/[.04] px-3 text-xs font-medium text-zinc-200 transition hover:border-violet-400/40 hover:bg-white/[.07]"
-      title={definition.description}
-    >
-      <Icon size={14} />
-      {definition.shortLabel}
-    </button>
-  );
-}
-
-function ToolbarButton({ label, icon, onClick, strong, active }: { label: string; icon: React.ReactNode; onClick: () => void; strong?: boolean; active?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition",
-        strong && "border-violet-400/30 bg-violet-400/15 text-violet-100 hover:bg-violet-400/20",
-        active && "border-emerald-400/30 bg-emerald-400/15 text-emerald-100",
-        !strong && !active && "border-white/[.08] bg-white/[.04] text-zinc-200 hover:bg-white/[.07]",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function WorkflowCanvasNode({ data, selected }: NodeProps<BuilderNode>) {
-  const definition = NODE_DEFINITIONS[data.kind];
-  const Icon = definition.icon;
-  const statusTone = data.status === "success" ? "bg-emerald-400" : data.status === "running" ? "bg-violet-400" : data.status === "error" ? "bg-rose-400" : "bg-zinc-600";
-
-  return (
-    <div className={cn(
-      "w-[220px] rounded-xl border bg-[#111620] p-3 text-zinc-100 shadow-[0_18px_60px_-34px_rgba(0,0,0,.95)] transition",
-      selected ? "border-violet-300/80 ring-4 ring-violet-400/15" : "border-white/[.1]",
-    )}>
-      {data.kind !== "start_trigger" && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!size-3 !border-2 !border-[#111620] !bg-sky-300"
-        />
-      )}
-
-      <div className="flex items-start justify-between gap-3">
-        <span className={cn("grid size-10 shrink-0 place-items-center rounded-lg border", definition.color)}>
-          <Icon size={17} />
-        </span>
-        <span className="flex items-center gap-1.5 text-[10px] capitalize text-zinc-500">
-          <span className={cn("size-1.5 rounded-full", statusTone)} />
-          {data.status}
-        </span>
-      </div>
-      <div className="mt-3 truncate text-sm font-semibold text-white">{data.label}</div>
-      <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-zinc-500">{definition.description}</div>
-
-      {definition.outputs.map((output, index) => (
-        <Handle
-          key={output}
-          id={output}
-          type="source"
-          position={Position.Right}
-          className="!size-3 !border-2 !border-[#111620] !bg-violet-300"
-          style={{ top: `${38 + index * 24}px` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function NodeSettingsPanel({
-  node,
-  previousGroups,
-  onClose,
-  onDelete,
-  onUpdate,
-}: {
-  node: BuilderNode;
-  previousGroups: PreviousNodeGroup[];
-  onClose: () => void;
-  onDelete: () => void;
-  onUpdate: (config: Record<string, string>, label: string) => void;
-}) {
-  const definition = NODE_DEFINITIONS[node.data.kind];
-  const [activeField, setActiveField] = useState(definition.fields[0]?.key || "");
-
-  useEffect(() => {
-    setActiveField(definition.fields[0]?.key || "");
-  }, [definition.fields, node.id]);
-
-  function updateConfig(key: string, value: string) {
-    onUpdate({ ...node.data.config, [key]: value }, node.data.label);
+  function updateCredential(platform: MarketingPlatform, key: keyof MarketingCredentialInput, value: string) {
+    setCredentials((current) => ({ ...current, [platform]: { ...current[platform], [key]: value } }));
   }
 
-  function setMapping(expression: string, targetKey = activeField) {
-    if (!targetKey) return;
-    updateConfig(targetKey, expression);
+  async function connectPlatform(platform: MarketingPlatform) {
+    const draft = credentials[platform];
+    if (!draft.access_token.trim() || !draft.account_id.trim() || (platform === "webhook" && !draft.webhook_url?.trim())) {
+      setNotice({ type: "error", message: `Complete the ${PLATFORM_META[platform].label} connection fields first.` });
+      return;
+    }
+    setPending(`credential:${platform}`);
+    setNotice(null);
+    try {
+      const next = await api.saveMarketingCredential(platform, draft);
+      acceptState(next);
+      setCredentials((current) => ({ ...current, [platform]: { ...EMPTY_CREDENTIAL } }));
+      setForm((current) => current && !current.platforms.includes(platform)
+        ? { ...current, platforms: [...current.platforms, platform] }
+        : current);
+      setNotice({ type: "success", message: `${PLATFORM_META[platform].label} connected. The token is encrypted and is never returned to the browser.` });
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, `Could not connect ${PLATFORM_META[platform].label}.`) });
+    } finally {
+      setPending("");
+    }
   }
 
+  async function disconnectPlatform(platform: MarketingPlatform) {
+    setPending(`credential:${platform}`);
+    try {
+      const next = await api.deleteMarketingCredential(platform);
+      acceptState(next);
+      setForm((current) => current ? { ...current, platforms: current.platforms.filter((item) => item !== platform) } : current);
+    } catch (caught) {
+      setNotice({ type: "error", message: messageFrom(caught, `Could not disconnect ${PLATFORM_META[platform].label}.`) });
+    } finally {
+      setPending("");
+    }
+  }
+
+  if (isLoading || !data || !form) return <MarketingAgentSkeleton />;
+  if (error) return <LoadError message={messageFrom(error, "Could not load the marketing agent.")} />;
+
+  const nextRun = form.active ? data.agent.next_run_at : null;
+
   return (
-    <div className="absolute bottom-5 right-5 top-32 z-20 flex w-[390px] flex-col rounded-2xl border border-white/[.08] bg-[#0c1018]/95 shadow-2xl shadow-black/40 backdrop-blur-xl">
-      <div className="flex items-start justify-between gap-3 border-b border-white/[.08] p-4">
-        <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-[.18em] text-zinc-600">Node settings</div>
-          <h2 className="mt-1 truncate text-base font-semibold text-white">{definition.label}</h2>
-          <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{definition.description}</p>
-        </div>
-        <button onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-white/[.06] hover:text-white" aria-label="Close node settings">
-          <X size={15} />
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        <div className="space-y-4">
-          <label className="space-y-2">
-            <span className="text-xs font-medium text-zinc-300">Label</span>
-            <input
-              value={node.data.label}
-              onChange={(event) => onUpdate(node.data.config, event.target.value)}
-              className="h-10 w-full rounded-lg border border-white/[.08] bg-black/25 px-3 text-sm text-zinc-100 outline-none focus:border-violet-400/50"
-            />
-          </label>
-
-          {definition.fields.map((field) => (
-            <NodeField
-              key={field.key}
-              field={field}
-              value={node.data.config[field.key] || ""}
-              previousGroups={previousGroups}
-              onFocus={() => setActiveField(field.key)}
-              onChange={(value) => updateConfig(field.key, value)}
-              onMappingDrop={(expression) => setMapping(expression, field.key)}
-              onMappingSelect={(expression) => updateConfig(field.key, expression)}
-            />
-          ))}
-        </div>
-
-        <div className="mt-5 rounded-xl border border-white/[.08] bg-white/[.03] p-3">
-          <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="mx-auto max-w-[1500px] space-y-5 pb-10">
+      <section className="relative overflow-hidden rounded-3xl border border-white/[.08] bg-[#0d1017] p-5 shadow-2xl shadow-black/20 md:p-7">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_0%,rgba(139,92,246,.2),transparent_32%),radial-gradient(circle_at_90%_20%,rgba(34,211,238,.09),transparent_30%)]" />
+        <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-start gap-4">
+            <span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-violet-300/20 bg-violet-400/10 text-violet-200 shadow-lg shadow-violet-500/10">
+              <Bot size={22} />
+            </span>
             <div>
-              <div className="text-xs font-semibold text-white">Input data</div>
-              <div className="mt-1 text-[11px] text-zinc-500">Choose fields from connected upstream nodes.</div>
-            </div>
-            <span className="rounded-full bg-white/[.06] px-2 py-1 text-[10px] text-zinc-400">{activeField || "no field"}</span>
-          </div>
-
-          <div className="space-y-3">
-            {!previousGroups.length && (
-              <div className="rounded-lg border border-dashed border-white/[.1] p-3 text-xs leading-5 text-zinc-500">
-                Connect a previous node to see output fields here.
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[.16em] text-violet-200">Default agent</span>
+                <span className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px]", form.active ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "border-white/[.08] bg-white/[.03] text-zinc-500")}>
+                  <span className={cn("size-1.5 rounded-full", form.active ? "bg-emerald-400" : "bg-zinc-600")} />
+                  {form.active ? "Schedule active" : "Draft"}
+                </span>
               </div>
-            )}
+              <input
+                value={form.name}
+                onChange={(event) => update("name", event.target.value)}
+                className="mt-3 w-full bg-transparent text-2xl font-semibold tracking-tight text-white outline-none md:text-3xl"
+                aria-label="Agent name"
+              />
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">Learns the business once, creates one focused image campaign, and publishes it across connected channels on your schedule.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => saveAgent()} disabled={Boolean(pending)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/[.1] bg-white/[.04] px-4 text-xs font-semibold text-zinc-200 transition hover:bg-white/[.08] disabled:opacity-50">
+              {pending === "save" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save
+            </button>
+            <button onClick={() => saveAgent(!form.active)} disabled={Boolean(pending)} className={cn("inline-flex h-10 items-center gap-2 rounded-xl border px-4 text-xs font-semibold transition disabled:opacity-50", form.active ? "border-amber-400/20 bg-amber-400/10 text-amber-100" : "border-emerald-400/20 bg-emerald-400/10 text-emerald-100")}>
+              <CalendarClock size={14} />
+              {form.active ? "Pause schedule" : "Save & activate"}
+            </button>
+            <button onClick={runNow} disabled={Boolean(pending)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-xs font-bold text-zinc-950 transition hover:bg-zinc-200 disabled:opacity-50">
+              {pending === "run" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              Run now
+            </button>
+          </div>
+        </div>
+      </section>
 
-            {previousGroups.map((group) => (
-              <div key={group.node.id} className="rounded-lg border border-white/[.07] bg-black/20 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-medium text-zinc-200">Previous Node: {group.node.data.label}</div>
-                    <div className="mt-1 truncate text-[10px] text-zinc-600">{group.node.id}</div>
+      {notice && (
+        <div className={cn("flex items-start gap-2 rounded-2xl border px-4 py-3 text-xs", notice.type === "success" ? "border-emerald-400/20 bg-emerald-400/[.08] text-emerald-100" : "border-rose-400/20 bg-rose-400/[.08] text-rose-100")}>
+          {notice.type === "success" ? <CheckCircle2 size={15} className="mt-px shrink-0" /> : <XCircle size={15} className="mt-px shrink-0" />}
+          {notice.message}
+        </div>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
+        <div className="space-y-5">
+          <Card className="overflow-hidden p-0">
+            <SectionHeader icon={Building2} eyebrow="01 · Context" title="Business intelligence" description="Workspace details are the source of truth; the website is optional supporting context." />
+            <div className="grid gap-5 border-t border-white/[.06] p-5 lg:grid-cols-[1.1fr_.9fr]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-white/[.06] bg-black/15 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[.16em] text-zinc-600">Workspace profile</p>
+                      <h3 className="mt-2 text-base font-semibold text-white">{data.business.name}</h3>
+                    </div>
+                    <span className="rounded-full border border-emerald-400/15 bg-emerald-400/[.07] px-2 py-1 text-[10px] text-emerald-300">Synced</span>
                   </div>
-                  <span className="rounded-full bg-white/[.06] px-2 py-1 text-[10px] text-zinc-500">{group.fields.length} fields</span>
+                  <p className="mt-3 text-xs leading-6 text-zinc-500">{data.business.summary || data.business.details || "Add business details in Settings so the agent can create specific campaigns."}</p>
                 </div>
-
-                {group.fields.length ? (
-                  <div className="mt-3 grid gap-2">
-                    {group.fields.map((field) => {
-                      const expression = mappingExpression(group.node, field, previousGroups.length);
-                      return (
-                        <button
-                          key={`${group.node.id}-${field.key}`}
-                          draggable
-                          onDragStart={(event) => {
-                            event.dataTransfer.setData("application/voxora-mapping", expression);
-                            event.dataTransfer.effectAllowed = "copy";
-                          }}
-                          onClick={() => setMapping(expression)}
-                          className="flex items-center justify-between gap-3 rounded-md border border-white/[.06] bg-white/[.035] px-2 py-2 text-left text-xs transition hover:border-violet-400/35 hover:bg-white/[.06]"
-                          title={expression}
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate font-mono text-sky-200">{field.key}</span>
-                            <span className="mt-0.5 block truncate text-[10px] text-zinc-600">{field.type}</span>
-                          </span>
-                          <span className="shrink-0 font-mono text-[10px] text-zinc-500">{expression}</span>
-                        </button>
-                      );
-                    })}
+                <Field label="Business website" hint="Used for text context only. Images are selected below, never entered as image URLs.">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Globe2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+                      <input value={form.website_url} onChange={(event) => update("website_url", event.target.value)} placeholder="https://yourbusiness.com" className="field-input pl-9" />
+                    </div>
+                    <button onClick={refreshContext} disabled={Boolean(pending) || !form.website_url.trim()} className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/[.08] bg-white/[.04] px-3 text-xs text-zinc-300 hover:bg-white/[.07] disabled:opacity-40">
+                      {pending === "context" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      Refresh
+                    </button>
                   </div>
-                ) : (
-                  <div className="mt-3 rounded-lg border border-dashed border-white/[.1] p-3 text-xs leading-5 text-zinc-500">
-                    No output fields available. Run this node or define its output schema.
+                </Field>
+                {data.business.website_summary && (
+                  <div className="rounded-xl border border-cyan-400/10 bg-cyan-400/[.04] px-3 py-2.5 text-[11px] leading-5 text-zinc-500">
+                    <span className="font-medium text-cyan-200">Cached website context: </span>{data.business.website_summary}
                   </div>
                 )}
               </div>
-            ))}
-          </div>
+              <div className="space-y-4">
+                <Field label="Campaign goal"><textarea value={form.goal} onChange={(event) => update("goal", event.target.value)} className="field-textarea min-h-28" placeholder="Generate qualified interest for our core offer." /></Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Audience"><input value={form.audience} onChange={(event) => update("audience", event.target.value)} className="field-input" placeholder="Decision-makers in India" /></Field>
+                  <Field label="Brand tone"><input value={form.tone} onChange={(event) => update("tone", event.target.value)} className="field-input" placeholder="Clear, warm, confident" /></Field>
+                </div>
+                <Field label="Call to action"><input value={form.call_to_action} onChange={(event) => update("call_to_action", event.target.value)} className="field-input" placeholder="Book a demo" /></Field>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden p-0">
+            <SectionHeader icon={ImagePlus} eyebrow="02 · Creative" title="Image campaign studio" description="Upload product, team, location, or brand references from your device. Video generation stays disabled." trailing={<span className="rounded-full border border-white/[.08] px-2.5 py-1 text-[10px] text-zinc-500">Images only</span>} />
+            <div className="border-t border-white/[.06] p-5">
+              <div className="grid gap-4 md:grid-cols-3">
+                <Field label="Visual direction" className="md:col-span-2"><input value={form.image_style} onChange={(event) => update("image_style", event.target.value)} className="field-input" placeholder="Premium editorial photography with natural lighting" /></Field>
+                <Field label="Image quality"><select value={form.image_quality} onChange={(event) => update("image_quality", event.target.value as MarketingAgentUpdate["image_quality"])} className="field-input"><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium</option></select></Field>
+              </div>
+
+              <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-dashed border-white/[.12] bg-white/[.02] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="grid size-10 place-items-center rounded-xl bg-violet-400/10 text-violet-300"><Upload size={17} /></span>
+                  <div><p className="text-xs font-medium text-zinc-200">Select image files</p><p className="mt-1 text-[10px] text-zinc-600">PNG, JPEG or WebP · up to 10 MB each · all stay selectable; the router uses up to 2 per run to control image tokens</p></div>
+                </div>
+                <button onClick={() => fileInputRef.current?.click()} disabled={Boolean(pending)} className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-white/[.08] bg-white/[.05] px-3 text-xs text-zinc-200 hover:bg-white/[.08] disabled:opacity-50">
+                  {pending === "upload" ? <Loader2 size={14} className="animate-spin" /> : <FileImage size={14} />}
+                  Choose pictures
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={uploadFiles} />
+              </div>
+
+              {data.assets.length ? (
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {data.assets.map((asset) => {
+                    const selected = form.selected_asset_ids.includes(asset.id);
+                    return (
+                      <div key={asset.id} className={cn("group relative overflow-hidden rounded-2xl border bg-black/20 transition", selected ? "border-violet-400/50 ring-2 ring-violet-400/10" : "border-white/[.07]")}>
+                        <button onClick={() => toggleAsset(asset.id)} className="block aspect-square w-full overflow-hidden text-left" title={selected ? "Remove from campaign references" : "Use in campaign references"}>
+                          {/* The backend serves unguessable public asset URLs so Instagram and Threads can retrieve generated media. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={asset.public_url} alt={asset.filename} className="size-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                          <span className={cn("absolute left-2 top-2 grid size-6 place-items-center rounded-lg border backdrop-blur", selected ? "border-violet-300/30 bg-violet-500/80 text-white" : "border-white/15 bg-black/50 text-zinc-400")}>
+                            {selected && <Check size={13} />}
+                          </span>
+                        </button>
+                        <div className="flex items-center gap-2 px-2.5 py-2">
+                          <div className="min-w-0 flex-1"><p className="truncate text-[10px] text-zinc-300">{asset.filename}</p><p className="mt-0.5 text-[9px] capitalize text-zinc-600">{asset.origin}</p></div>
+                          <button onClick={() => deleteAsset(asset.id)} disabled={pending === `asset:${asset.id}`} className="grid size-7 place-items-center rounded-lg text-zinc-600 hover:bg-rose-400/10 hover:text-rose-300"><Trash2 size={12} /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-white/[.05] bg-black/10 px-4 py-7 text-center"><FileImage size={20} className="mx-auto text-zinc-700" /><p className="mt-2 text-xs text-zinc-500">No reference images yet. The agent can still generate a new campaign image from business context.</p></div>
+              )}
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden p-0">
+            <SectionHeader icon={Send} eyebrow="03 · Distribution" title="Publishing credentials" description="Credentials are encrypted in the backend. Saved tokens are never sent back to this page." trailing={<span className="flex items-center gap-1.5 rounded-full border border-emerald-400/15 bg-emerald-400/[.06] px-2.5 py-1 text-[10px] text-emerald-300"><LockKeyhole size={11} />{connectedCount} connected</span>} />
+            <div className="grid gap-4 border-t border-white/[.06] p-5 lg:grid-cols-2">
+              {PLATFORMS.map((platform) => (
+                <PlatformCard
+                  key={platform}
+                  platform={platform}
+                  enabled={form.platforms.includes(platform)}
+                  status={data.credentials[platform]}
+                  draft={credentials[platform]}
+                  pending={pending === `credential:${platform}`}
+                  onToggle={() => togglePlatform(platform)}
+                  onChange={(key, value) => updateCredential(platform, key, value)}
+                  onConnect={() => connectPlatform(platform)}
+                  onDisconnect={() => disconnectPlatform(platform)}
+                />
+              ))}
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden p-0">
+            <SectionHeader icon={Clock3} eyebrow="04 · Automation" title="Campaign schedule" description="Save an interval and the default agent will claim due runs automatically." />
+            <div className="grid gap-4 border-t border-white/[.06] p-5 md:grid-cols-3">
+              <Field label="Run every"><select value={form.interval_hours} onChange={(event) => update("interval_hours", Number(event.target.value))} className="field-input"><option value={3}>3 hours</option><option value={6}>6 hours</option><option value={12}>12 hours</option><option value={24}>24 hours</option></select></Field>
+              <Field label="Timezone"><input value={form.timezone} onChange={(event) => update("timezone", event.target.value)} className="field-input" placeholder="Asia/Kolkata" /></Field>
+              <div className="rounded-2xl border border-white/[.06] bg-black/15 p-3.5"><p className="text-[10px] uppercase tracking-[.14em] text-zinc-600">Next run</p><p className="mt-2 text-xs font-medium text-zinc-200">{nextRun ? formatDate(nextRun) : "Schedule paused"}</p><p className="mt-1 text-[10px] text-zinc-600">Runs continue without this page open.</p></div>
+            </div>
+          </Card>
         </div>
-      </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-white/[.08] p-3">
-        <div className="text-[11px] text-zinc-500">Mappings save in node config.</div>
-        <button onClick={onDelete} className="inline-flex h-9 items-center gap-2 rounded-lg bg-rose-400/10 px-3 text-xs font-semibold text-rose-200 hover:bg-rose-400/15">
-          <Trash2 size={13} />
-          Delete
-        </button>
+        <aside className="space-y-5 xl:sticky xl:top-20 xl:self-start">
+          <Card className="overflow-hidden p-0">
+            <div className="border-b border-white/[.06] p-5"><div className="flex items-center gap-2 text-sm font-semibold"><Zap size={16} className="text-amber-300" />Token-efficient route</div><p className="mt-2 text-xs leading-5 text-zinc-600">One compact brief, one image request, then direct API publishers.</p></div>
+            <div className="p-5">
+              <RouteStep icon={Building2} title="Cached context" detail="Workspace + website summary" active />
+              <RouteConnector />
+              <RouteStep icon={BrainCircuit} title="Copy router" detail={`${data.routing.copy_model} · one JSON brief`} active />
+              <RouteConnector />
+              <RouteStep icon={Sparkles} title="Image model" detail={`${data.routing.image_model} · ${form.image_quality}`} active />
+              <RouteConnector />
+              <RouteStep icon={Send} title="Direct publishers" detail={`${form.platforms.length} selected channel${form.platforms.length === 1 ? "" : "s"}`} active={form.platforms.length > 0} />
+            </div>
+            <div className="border-t border-white/[.06] bg-white/[.02] px-5 py-3 text-[10px] leading-4 text-zinc-600">{data.routing.strategy}</div>
+          </Card>
+
+          <Card className="overflow-hidden p-0">
+            <div className="flex items-center justify-between border-b border-white/[.06] p-5"><div><h3 className="text-sm font-semibold">Recent campaigns</h3><p className="mt-1 text-[10px] text-zinc-600">Latest automated and manual runs</p></div><Activity size={16} className="text-cyan-300" /></div>
+            <div className="divide-y divide-white/[.05]">
+              {data.runs.length ? data.runs.slice(0, 6).map((run) => <RunItem key={run.id} run={run} />) : <div className="p-6 text-center text-xs text-zinc-600">Run the agent to create the first campaign.</div>}
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Clock3 size={15} className="text-violet-300" />Automation health</div><span className={cn("size-2 rounded-full", form.active ? "bg-emerald-400 shadow-[0_0_9px_#34d399]" : "bg-zinc-700")} /></div>
+            <div className="mt-4 space-y-3 text-xs">
+              <HealthRow label="Status" value={form.active ? "Scheduled" : "Paused"} />
+              <HealthRow label="Interval" value={`${form.interval_hours} hours`} />
+              <HealthRow label="Last run" value={data.agent.last_run_at ? formatDate(data.agent.last_run_at) : "Not run yet"} />
+              <HealthRow label="Next run" value={nextRun ? formatDate(nextRun) : "—"} />
+            </div>
+          </Card>
+        </aside>
       </div>
     </div>
   );
 }
 
-function RunLogBar({ logs, onClose }: { logs: WorkflowRunLog[]; onClose: () => void }) {
-  return (
-    <div className="absolute bottom-5 right-5 z-20 w-80 rounded-xl border border-white/[.08] bg-[#0c1018]/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-xl">
-      <div className="flex items-center justify-between text-xs font-semibold text-white">
-        Last run
-        <button onClick={onClose} className="grid size-6 place-items-center rounded-md hover:bg-white/[.06]" aria-label="Close run log">
-          <X size={13} />
-        </button>
-      </div>
-      <div className="mt-2 max-h-32 space-y-2 overflow-auto">
-        {logs.map((log) => (
-          <div key={log.id} className="rounded-lg bg-white/[.04] px-2 py-1.5 text-[11px] text-zinc-400">
-            <span className="text-zinc-200">{log.nodeLabel}</span>: {log.message}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-async function runVoiceCalls(workflow: WorkflowDraft, user: AuthUser | null): Promise<WorkflowRunLog[]> {
-  const voiceNodes = workflow.nodes.filter((node) => normalizeKind(node.type) === "call_voice");
-  if (!voiceNodes.length) return [];
-
-  return Promise.all(voiceNodes.map(async (node) => {
-    const normalizedPhone = normalizeRunnablePhone(node.config.phoneNumber || "");
-    if (!normalizedPhone.ok) return workflowLog(node, "error", normalizedPhone.message);
-
-    const defaultNiche = user?.default_niche?.trim();
-    if (!defaultNiche) return workflowLog(node, "error", "Set a default niche in the workspace before running a call.");
-
-    try {
-      const response = await api.startOutboundCall({
-        to_number: normalizedPhone.value,
-        niche: defaultNiche,
-        business_name: user?.business_name,
-        business_details: user?.business_details,
-        campaign_goal: node.config.goal?.trim() || `Call the customer for ${user?.business_name || "the business"} and capture the outcome.`,
-      });
-      return workflowLog(node, "success", `Call queued to ${normalizedPhone.value}. SID: ${response.call_sid}`);
-    } catch (error) {
-      return workflowLog(node, "error", error instanceof Error ? error.message : "Could not place outbound call.");
-    }
-  }));
-}
-
-function workflowLog(node: WorkflowNode, status: WorkflowRunLog["status"], message: string): WorkflowRunLog {
-  return {
-    id: makeId("log"),
-    nodeId: node.id,
-    nodeLabel: node.label,
-    status,
-    message,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-function NodeField({
-  field,
-  value,
-  previousGroups,
-  onFocus,
-  onChange,
-  onMappingDrop,
-  onMappingSelect,
-}: {
-  field: NodeConfigField;
-  value: string;
-  previousGroups: PreviousNodeGroup[];
-  onFocus: () => void;
-  onChange: (value: string) => void;
-  onMappingDrop: (expression: string) => void;
-  onMappingSelect: (expression: string) => void;
+function PlatformCard({ platform, enabled, status, draft, pending, onToggle, onChange, onConnect, onDisconnect }: {
+  platform: MarketingPlatform;
+  enabled: boolean;
+  status: MarketingAgentState["credentials"][MarketingPlatform];
+  draft: MarketingCredentialInput;
+  pending: boolean;
+  onToggle: () => void;
+  onChange: (key: keyof MarketingCredentialInput, value: string) => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
 }) {
-  const className = "w-full rounded-lg border border-white/[.08] bg-black/25 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-400/50";
-  const mappingOptions = previousGroups.flatMap((group) => group.fields.map((outputField) => ({
-    nodeId: group.node.id,
-    nodeLabel: group.node.data.label,
-    field: outputField,
-    expression: mappingExpression(group.node, outputField, previousGroups.length),
-  })));
-  const dropHandlers = {
-    onDragOver: (event: DragEvent<HTMLElement>) => {
-      if (event.dataTransfer.types.includes("application/voxora-mapping")) event.preventDefault();
-    },
-    onDrop: (event: DragEvent<HTMLElement>) => {
-      const expression = event.dataTransfer.getData("application/voxora-mapping");
-      if (!expression) return;
-      event.preventDefault();
-      onMappingDrop(expression);
-    },
-  };
-
+  const meta = PLATFORM_META[platform];
+  const Icon = meta.icon;
   return (
-    <label className="space-y-2">
-      <span className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium text-zinc-300">{field.label}</span>
-        {field.kind !== "select" && (
-          <select
-            value=""
-            onFocus={onFocus}
-            onChange={(event) => {
-              if (!event.target.value) return;
-              onMappingSelect(event.target.value);
-              event.currentTarget.value = "";
-            }}
-            disabled={!mappingOptions.length}
-            className="h-7 max-w-44 rounded-md border border-white/[.08] bg-black/30 px-2 text-[11px] text-zinc-300 outline-none disabled:cursor-not-allowed disabled:text-zinc-700"
-          >
-            <option value="">{mappingOptions.length ? "Use field" : "No fields"}</option>
-            {previousGroups.map((group) => (
-              <optgroup key={group.node.id} label={group.node.data.label}>
-                {group.fields.map((outputField) => {
-                  const expression = mappingExpression(group.node, outputField, previousGroups.length);
-                  return <option key={`${group.node.id}-${outputField.key}`} value={expression}>{outputField.key}</option>;
-                })}
-              </optgroup>
-            ))}
-          </select>
-        )}
-      </span>
-      {field.kind === "textarea" ? (
-        <textarea value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder} className={cn(className, "min-h-24 resize-y py-2")} {...dropHandlers} />
-      ) : field.kind === "select" ? (
-        <select value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} className={cn(className, "h-10")} {...dropHandlers}>
-          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
-        </select>
-      ) : field.kind === "phone" && !isMappingValue(value) ? (
-        <PhoneInputField
-          value={value}
-          placeholder={field.placeholder}
-          className={className}
-          onFocus={onFocus}
-          onChange={onChange}
-          dropHandlers={dropHandlers}
-        />
+    <div className={cn("rounded-2xl border p-4 transition", enabled ? "border-white/[.12] bg-white/[.025]" : "border-white/[.06] bg-black/10")}>
+      <div className="flex items-start gap-3">
+        <span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border", meta.tone)}><Icon size={17} /></span>
+        <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h3 className="text-xs font-semibold text-zinc-200">{meta.label}</h3>{status.connected && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] text-emerald-300">Connected</span>}</div><p className="mt-1 text-[10px] leading-4 text-zinc-600">{meta.description}</p></div>
+        <button onClick={onToggle} className={cn("relative h-6 w-11 shrink-0 rounded-full border transition", enabled ? "border-violet-300/30 bg-violet-500" : "border-white/[.1] bg-white/[.04]")} aria-label={`${enabled ? "Disable" : "Enable"} ${meta.label}`}><span className={cn("absolute top-0.5 size-4 rounded-full bg-white transition", enabled ? "left-[22px]" : "left-1")} /></button>
+      </div>
+      {status.connected ? (
+        <div className="mt-4 flex items-center gap-3 rounded-xl border border-emerald-400/10 bg-emerald-400/[.04] p-3"><LockKeyhole size={14} className="text-emerald-300" /><div className="min-w-0 flex-1"><p className="truncate text-[10px] text-emerald-100">{status.account_label}</p><p className="mt-0.5 font-mono text-[9px] text-zinc-600">Token ·••••••••· encrypted</p></div><button onClick={onDisconnect} disabled={pending} className="text-[10px] text-zinc-500 hover:text-rose-300">Remove</button></div>
       ) : (
-        <input value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder} className={cn(className, "h-10")} {...dropHandlers} />
+        <div className="mt-4 space-y-2.5">
+          <input value={draft.account_id} onChange={(event) => onChange("account_id", event.target.value)} className="field-input h-10 text-xs" placeholder={meta.accountPlaceholder} aria-label={meta.accountLabel} />
+          {platform === "webhook" && <input value={draft.webhook_url} onChange={(event) => onChange("webhook_url", event.target.value)} className="field-input h-10 text-xs" placeholder="https://publisher.example.com/campaigns" aria-label="Webhook URL" />}
+          <div className="flex gap-2"><input type="password" value={draft.access_token} onChange={(event) => onChange("access_token", event.target.value)} className="field-input h-10 flex-1 text-xs" placeholder={platform === "webhook" ? "Webhook bearer secret" : "Access token"} aria-label={`${meta.label} access token`} /><button onClick={onConnect} disabled={pending} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-white/[.08] bg-white/[.05] px-3 text-[10px] font-semibold text-zinc-200 hover:bg-white/[.08] disabled:opacity-50">{pending ? <Loader2 size={12} className="animate-spin" /> : <LockKeyhole size={12} />}Connect</button></div>
+        </div>
       )}
-    </label>
-  );
-}
-
-function PhoneInputField({
-  value,
-  placeholder,
-  className,
-  onFocus,
-  onChange,
-  dropHandlers,
-}: {
-  value: string;
-  placeholder?: string;
-  className: string;
-  onFocus: () => void;
-  onChange: (value: string) => void;
-  dropHandlers: {
-    onDragOver: (event: DragEvent<HTMLElement>) => void;
-    onDrop: (event: DragEvent<HTMLElement>) => void;
-  };
-}) {
-  const phone = splitPhoneNumber(value, DEFAULT_COUNTRY_CODE);
-  const countryOption = countryOptionFor(phone.countryCode);
-
-  function updateCountryCode(countryCode: string) {
-    onChange(formatPhoneNumber(countryCode, phone.digits));
-  }
-
-  function updateDigits(nextValue: string) {
-    onChange(formatPhoneNumber(phone.countryCode, nextValue));
-  }
-
-  return (
-    <div className="flex h-10 overflow-hidden rounded-lg border border-white/[.08] bg-black/25 focus-within:border-violet-400/50" {...dropHandlers}>
-      <select
-        value={phone.countryCode}
-        onFocus={onFocus}
-        onChange={(event) => updateCountryCode(event.target.value)}
-        className="h-full border-r border-white/[.08] bg-black/30 px-2 text-xs font-medium text-zinc-300 outline-none"
-        aria-label="Country code"
-      >
-        {COUNTRY_CODE_OPTIONS.map((option) => (
-          <option key={option.code} value={option.code}>{option.label}</option>
-        ))}
-      </select>
-      <input
-        value={phone.digits}
-        onFocus={onFocus}
-        onChange={(event) => updateDigits(event.target.value)}
-        placeholder={countryOption.placeholder || placeholder}
-        className={cn(className, "h-full min-w-0 flex-1 border-0 bg-transparent px-3 focus:border-transparent")}
-        inputMode="numeric"
-        autoComplete="tel"
-      />
     </div>
   );
 }
 
-function isMappingValue(value: string) {
-  return /\{\{.+\}\}/.test(value.trim());
+function SectionHeader({ icon: Icon, eyebrow, title, description, trailing }: { icon: typeof Bot; eyebrow: string; title: string; description: string; trailing?: React.ReactNode }) {
+  return <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center"><span className="grid size-10 shrink-0 place-items-center rounded-xl border border-white/[.08] bg-white/[.04] text-zinc-300"><Icon size={17} /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-violet-300/70">{eyebrow}</p><h2 className="mt-1 text-sm font-semibold text-zinc-100">{title}</h2><p className="mt-1 text-[11px] leading-5 text-zinc-600">{description}</p></div>{trailing}</div>;
 }
 
-function normalizeRunnablePhone(value: string): { ok: true; value: string } | { ok: false; message: string } {
-  if (isMappingValue(value)) return { ok: false, message: "Resolve the mapped phone value before running this call node." };
-  return normalizePhoneNumber(value, DEFAULT_COUNTRY_CODE);
+function Field({ label, hint, children, className }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
+  return <label className={cn("block space-y-2", className)}><span className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-300">{label}{hint && <span className="text-right text-[9px] font-normal text-zinc-600">{hint}</span>}</span>{children}</label>;
 }
 
-function getPreviousNodeGroups(targetNode: BuilderNode, nodes: BuilderNode[], edges: BuilderEdge[]): PreviousNodeGroup[] {
-  const nodesById = new Map(nodes.map((node) => [node.id, node]));
-  const seen = new Set<string>();
-  const groups: PreviousNodeGroup[] = [];
-  const queue = edges.filter((edge) => edge.target === targetNode.id).map((edge) => edge.source);
-
-  while (queue.length) {
-    const nodeId = queue.shift();
-    if (!nodeId || seen.has(nodeId)) continue;
-    const node = nodesById.get(nodeId);
-    if (!node) continue;
-
-    seen.add(node.id);
-    groups.push({ node, fields: getNodeOutputSchema(node) });
-    queue.push(...edges.filter((edge) => edge.target === node.id).map((edge) => edge.source));
-  }
-
-  return groups;
+function RouteStep({ icon: Icon, title, detail, active }: { icon: typeof Bot; title: string; detail: string; active: boolean }) {
+  return <div className="flex items-center gap-3"><span className={cn("grid size-9 shrink-0 place-items-center rounded-xl border", active ? "border-violet-400/20 bg-violet-400/10 text-violet-200" : "border-white/[.06] bg-white/[.02] text-zinc-700")}><Icon size={15} /></span><div className="min-w-0"><p className={cn("text-xs font-medium", active ? "text-zinc-200" : "text-zinc-600")}>{title}</p><p className="mt-0.5 truncate text-[9px] text-zinc-600">{detail}</p></div></div>;
 }
 
-function getNodeOutputSchema(node: BuilderNode): OutputField[] {
-  const dynamicSchema = parseOutputSchema(node.data.config.__outputSchema || node.data.config.responseSchema || "");
-  if (dynamicSchema.length) return dynamicSchema;
-  return NODE_DEFINITIONS[node.data.kind].outputSchema;
+function RouteConnector() { return <div className="ml-[17px] h-5 w-px bg-gradient-to-b from-violet-400/50 to-white/[.08]" />; }
+
+function RunItem({ run }: { run: MarketingRun }) {
+  const successful = run.platform_results.filter((result) => result.status === "published").length;
+  const statusTone = run.status === "completed" ? "bg-emerald-400" : run.status === "failed" ? "bg-rose-400" : run.status === "running" || run.status === "queued" ? "bg-amber-400" : "bg-cyan-400";
+  return <div className="flex gap-3 p-4">{run.image_url ? <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={run.image_url} alt={run.headline || "Campaign image"} className="size-12 shrink-0 rounded-xl object-cover" /></> : <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-white/[.04] text-zinc-700"><FileImage size={17} /></span>}<div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className={cn("size-1.5 shrink-0 rounded-full", statusTone)} /><p className="truncate text-[11px] font-medium text-zinc-300">{run.headline || run.status}</p></div><p className="mt-1 line-clamp-2 text-[9px] leading-4 text-zinc-600">{run.error || run.caption || "Preparing campaign…"}</p><div className="mt-2 flex items-center justify-between text-[9px] text-zinc-700"><span>{formatDate(run.started_at)}</span><span>{successful} published · {run.model_route}</span></div></div></div>;
 }
 
-function parseOutputSchema(raw: string): OutputField[] {
-  const value = raw.trim();
-  if (!value) return [];
+function HealthRow({ label, value }: { label: string; value: string }) { return <div className="flex items-start justify-between gap-3"><span className="text-zinc-600">{label}</span><span className="text-right text-zinc-300">{value}</span></div>; }
 
-  try {
-    return schemaFromParsedValue(JSON.parse(value));
-  } catch {}
-
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((key) => ({ key, label: key, type: "unknown" }));
+function MarketingAgentSkeleton() {
+  return <div className="mx-auto max-w-[1500px] space-y-5"><div className="h-44 animate-pulse rounded-3xl border border-white/[.06] bg-white/[.03]" /><div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_350px]"><div className="space-y-5">{[280, 360, 420].map((height) => <div key={height} style={{ height }} className="animate-pulse rounded-2xl border border-white/[.06] bg-white/[.025]" />)}</div><div className="h-[520px] animate-pulse rounded-2xl border border-white/[.06] bg-white/[.025]" /></div></div>;
 }
 
-function schemaFromParsedValue(value: unknown): OutputField[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        if (typeof item === "string") return { key: item, label: item, type: "unknown" };
-        if (item && typeof item === "object") {
-          const record = item as Record<string, unknown>;
-          const key = String(record.key || record.name || "");
-          if (!key) return null;
-          return {
-            key,
-            label: String(record.label || key),
-            type: String(record.type || "unknown"),
-            description: typeof record.description === "string" ? record.description : undefined,
-          };
-        }
-        return null;
-      })
-      .filter((item): item is OutputField => Boolean(item));
-  }
-
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const properties = record.properties && typeof record.properties === "object" ? record.properties as Record<string, unknown> : record;
-    return Object.entries(properties).map(([key, property]) => {
-      if (property && typeof property === "object" && "type" in property) {
-        return { key, label: key, type: String((property as Record<string, unknown>).type || "unknown") };
-      }
-      return { key, label: key, type: inferType(property) };
-    });
-  }
-
-  return [];
+function LoadError({ message }: { message: string }) {
+  return <div className="mx-auto max-w-2xl rounded-3xl border border-rose-400/20 bg-rose-400/[.06] p-8 text-center"><XCircle size={24} className="mx-auto text-rose-300" /><h2 className="mt-3 text-base font-semibold">Marketing agent unavailable</h2><p className="mt-2 text-sm text-rose-100/70">{message}</p></div>;
 }
 
-function inferType(value: unknown) {
-  if (Array.isArray(value)) return "array";
-  if (value === null) return "null";
-  return typeof value;
-}
-
-function mappingExpression(sourceNode: BuilderNode, field: OutputField, previousGroupCount: number) {
-  const reference = previousGroupCount === 1 ? "previousNode" : sourceNode.id;
-  return `{{${reference}.${field.key}}}`;
-}
-
-function workflowToFlowNodes(workflow: WorkflowDraft): BuilderNode[] {
-  return workflow.nodes.map(workflowNodeToFlowNode);
-}
-
-function workflowNodeToFlowNode(node: WorkflowNode): BuilderNode {
-  const kind = normalizeKind(node.type);
-  const definition = NODE_DEFINITIONS[kind];
+function configToForm(state: MarketingAgentState): MarketingAgentUpdate {
+  const { agent } = state;
   return {
-    id: node.id,
-    type: "workflowNode",
-    position: { x: node.x, y: node.y },
-    data: {
-      kind,
-      label: normalizeNodeLabel(node.label, kind, definition),
-      description: definition.description,
-      config: node.config || {},
-      status: node.status || "idle",
-    },
+    name: agent.name,
+    active: agent.active,
+    goal: agent.goal,
+    audience: agent.audience,
+    tone: agent.tone,
+    call_to_action: agent.call_to_action,
+    website_url: agent.website_url || state.business.website,
+    image_style: agent.image_style,
+    image_quality: agent.image_quality,
+    interval_hours: agent.interval_hours,
+    timezone: agent.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
+    platforms: agent.platforms,
+    selected_asset_ids: agent.selected_asset_ids,
   };
 }
 
-function workflowToFlowEdges(workflow: WorkflowDraft): BuilderEdge[] {
-  const nodeKinds = new Map(workflow.nodes.map((node) => [node.id, normalizeKind(node.type)]));
-  return workflow.edges.map((edge) => {
-    const output = edge.output || "out";
-    return {
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: output,
-      type: "smoothstep",
-      animated: true,
-      label: edgeOutputLabel(nodeKinds.get(edge.source), output),
-      labelStyle: { fill: "#d4d4d8", fontSize: 11, fontWeight: 600 },
-      labelBgStyle: { fill: "#10141d", fillOpacity: 0.92 },
-      labelBgPadding: [8, 4],
-      labelBgBorderRadius: 8,
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#8b5cf6" },
-      style: { stroke: "#8b5cf6", strokeWidth: 2 },
-      data: { output },
-    };
-  });
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
-function flowNodeToWorkflowNode(node: BuilderNode): WorkflowNode {
-  return {
-    id: node.id,
-    type: node.data.kind,
-    label: node.data.label,
-    x: Math.round(node.position.x),
-    y: Math.round(node.position.y),
-    config: node.data.config,
-    status: node.data.status,
-  };
-}
-
-function flowEdgeToWorkflowEdge(edge: BuilderEdge): WorkflowEdge {
-  return {
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    output: String(edge.sourceHandle || edge.data?.output || "out"),
-  };
-}
-
-function createWorkflowNode(kind: BuilderNodeKind, position: { x: number; y: number }, fixedId?: string, config: Record<string, string> = {}, label?: string): WorkflowNode {
-  const definition = NODE_DEFINITIONS[kind];
-  return {
-    id: fixedId || makeId(kind),
-    type: kind,
-    label: label || definition.label,
-    x: Math.round(position.x),
-    y: Math.round(position.y),
-    config: { ...Object.fromEntries(definition.fields.map((field) => [field.key, field.options?.[0] || ""])), ...config },
-    status: "idle",
-  };
-}
-
-function normalizeWorkflow(workflow: WorkflowDraft): WorkflowDraft {
-  return {
-    ...workflow,
-    nodes: workflow.nodes.map((node) => {
-      const kind = normalizeKind(node.type);
-      const definition = NODE_DEFINITIONS[kind];
-      return {
-        ...node,
-        type: kind,
-        label: normalizeNodeLabel(node.label, kind, definition),
-        config: node.config || {},
-        status: node.status || "idle",
-      };
-    }),
-    edges: workflow.edges || [],
-  };
-}
-
-function normalizeKind(type: string): BuilderNodeKind {
-  if (type in NODE_DEFINITIONS) return type as BuilderNodeKind;
-  if (type.includes("trigger")) return "start_trigger";
-  if (type.includes("ai")) return "ai_agent";
-  if (type.includes("call")) return "call_voice";
-  if (type.includes("lead") || type.includes("supabase")) return "lead_capture";
-  if (type.includes("condition") || type.includes("switch")) return "condition";
-  return "business_details";
-}
-
-function normalizeNodeLabel(label: string, kind: BuilderNodeKind, definition: NodeDefinition) {
-  if (kind === "start_trigger" && (!label || label.toLowerCase().includes("manual"))) return "Start";
-  return label || definition.label;
-}
-
-function edgeOutputLabel(kind: BuilderNodeKind | undefined, output: string) {
-  if (kind === "condition") return output === "true" ? "Confirmed" : output === "false" ? "Not confirmed" : formatEdgeOutput(output);
-  if (kind === "call_voice") return output === "completed" ? "Call finished" : output === "failed" ? "Call failed" : formatEdgeOutput(output);
-  if (kind === "lead_capture" && output === "lead") return "Lead saved";
-  return formatEdgeOutput(output);
-}
-
-function formatEdgeOutput(output: string) {
-  return output
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function findOpenPosition(position: { x: number; y: number }, existingNodes: BuilderNode[]) {
-  let next = { x: Math.round(position.x - NODE_WIDTH / 2), y: Math.round(position.y - NODE_HEIGHT / 2) };
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const overlaps = existingNodes.some((node) => Math.abs(node.position.x - next.x) < NODE_WIDTH && Math.abs(node.position.y - next.y) < NODE_HEIGHT);
-    if (!overlaps) return next;
-    next = { x: next.x + 42, y: next.y + 42 };
-  }
-  return next;
-}
-
-function saveLocalWorkflow(workflow: WorkflowDraft) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(WORKFLOW_KEY, JSON.stringify(workflow));
-}
-
-function makeId(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`;
-}
+function messageFrom(error: unknown, fallback: string) { return error instanceof Error ? error.message : fallback; }
